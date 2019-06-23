@@ -308,45 +308,60 @@ Suggested reporting rates:
   - Accelerometer: 2 Hz
   - Magnetometer: 2 Hz
   - Barometer: 2 Hz
+  - Thermometer: 0.2 Hz
   - GPS: 0.2 Hz
   - RSSI: 1 Hz
+  - Battery voltage: 0.2 Hz
 
 * `GROUND_ARMED` state:
   - Accelerometer: 33 Hz
   - Barometer: 33 Hz
   - Magnetometer: 2 Hz
+  - Thermometer: 2 Hz
   - GPS: 1 Hz
   - RSSI: 1 Hz
+  - Battery voltage: 2 Hz
 
 * `AIRBORNE_OUTBOUND` and `_INBOUND` states:
   - Accelerometer: 100 Hz
   - Barometer: 100 Hz
-  - Magnetometer: None.
+  - Magnetometer: None
+  - Thermometer: 5 Hz
   - GPS: 1 Hz
   - RSSI: 1 Hz
 
 * `AIRBORNE_DEPLOYMENT` state:
-  - None.
+  - None
 
 * `GROUND_RECOVERY` state:
   - GPS: 1 Hz
   - Magnetometer: 2 Hz
   - RSSI: 10 Hz
+  - Battery voltage: 1 Hz
 
 ### Control messages
 A few important control messages are given:
-* State machine transition: `Sn`, where `n` is the state level to apply.
+
+* State machine transition: `Sn`, where `n` is the state level to apply (see above).
+
 * Configuration: `SET:x`, where `x` is one of the following:
   - `G`: Ground pressure: `G:nnnn.nn`.
+  
   - `H`: Launch pad height: `H:nnn.n`.
-  - `A`: Averaging interval: `A:y:n`, where `y` indicates averaging for which device (`a`, `b`, `m`, `t`, `g`, `l` for accelerometer, barometer, magnetometer, thermometer, GPS and LDR, respectively).
-  - `T`: Timeouts
+  
+  - `A`: Averaging: `A:y:n`, where `y` is `a`, `b`, `m` for accelerometer, barometer, magnetometer, respectively, and `n` indicates how many samples to average over. Default is 10. Maximum depends on available memory.
+  
+  - `Tx:y.y`: Timeouts, where `x` is either
+    - `o`: Outbound, or
+    - `i`: Inbound
+
   - `L`: Limits: `L:xx:yyyyy.yyyy`. `x` indicates which limit to set:
     - `Ao`: accelerometer outbound (launch)
     - `Ai`: accelerometer inbound (landing)
     - `Bd`: barometer delta (launch and landing)
     - `Md`: magnetometer delta (arm and recovery)
-* Ping: 
+
+* Ping: `P`
 
 State machine transition commands will be accepted at **any** time.
 
