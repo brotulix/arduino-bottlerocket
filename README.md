@@ -142,6 +142,8 @@ Optional accessories:
 The payload control system can be implemented using a state machine. 8 states are suggested below.
 
 ### Ground, idle state
+`#define STATE_GROUND_IDLE 0`
+
 This is the default power-on state.
 When entering this state (such as upon power-on), the memory is cleared.
 In this state, only an RF link command will transition to on-pad idle state.
@@ -150,6 +152,8 @@ Listen for commands only.
 Ignore RBF ("Remove Before Flight") presence.
 
 ### Ground, on-pad idle state
+`#define STATE_GROUND_IDLE_ON_PAD 1`
+
 Whenever power is applied, enter this state. The system should be power conservative. A simple, occational reporting of (ground-level) averaged air pressure, gravitational vector and battery voltage. Command input must be accepted through RF link. This is the time to configure system parameters such as:
 * Sea level pressure of the moment
 * Height of launch pad (default launch site is approx. 7.6m ASL according to norgeskart.no).
@@ -159,9 +163,13 @@ Whenever power is applied, enter this state. The system should be power conserva
 An optical or magnetic switch could be employed to arm the rocket for launch ("Remove before flight"), or a command could be sent through RF link to transition to armed state.
 
 ### Ground, armed state
+`#define STATE_GROUND_ARMED 2`
+
 In armed state, the rocket is simply waiting to leave the ground, and must therefore keep a constant watch on the accelerometer to detect changes in acceleration vector. Again, a magnet or optical link could be employed to make it clear that the rocket has left the launch pad, transitioning to the airborne outbound state.
 
 ### Airborne, outbound state
+`#define STATE_AIRBORNE_OUTBOUND 3`
+
 Now the air pressure should be kept under constant surveillance. All values should be reported back to ground control, or possibly a slight averaging could be employed to reduce time spent in TX.
 When the air pressure derivative becomes positive, transition to airborne deployment state.
 Two possible backup conditions for transition to airborne deployment state:
@@ -169,17 +177,25 @@ Two possible backup conditions for transition to airborne deployment state:
 * A simple flight-timer; after a certain time spent in airborne outbound state a transition **will** occur. Current flight tests indicate time spent airborne is around 5 seconds, so a timeout of 3.5 seconds may allow for at least a mildly decelerated landing in case of other trigger failures.
 
 ### Airborne, deployment state
+`#define STATE_AIRBORNE_DEPLOYMENT 4`
+
 Simply trigger the parachute deployment, then transition to airborne inbound state.
 
 ### Airborne, inbound state
+`#define STATE_AIRBORNE_INBOUND 5`
+
 Start looking for a spike in acceleration vector magnitude to indicate a potential touchdown, at which a transition to ground-state recovery should occur.
 
 ### Ground, recovery state
+`#define STATE_GROUND_RECOVERY 6`
+
 Enable audiovisual beacon, and if a GPS is present, start reporting position.
 Enable RF beacon mode by reporting RSSI value for any "ping" received (fox-hunting)?
 Whenever magnet/optical switch is engaged, or a command through RF link is received, transition to post-launch data-dump state.
 
 ### Ground, data-dump state
+`#define STATE_GROUND_DATA_DUMP 7`
+
 Similar to idle state in that sensors are not read, and no values reported. Only wait for a command to start dumping all recorded data via RF link or transition to ground idle state.
 
 ### State machine diagram
@@ -283,17 +299,65 @@ Some status messages are given, such as
 
 During debugging, it would be nice to know a little about what the state machine is doing, so a debug statement would also be handy.
 
+Status reporting could follow a standard format, such as:
+`Sa` followed at relevant frequencies by `Abb.bbb`, `Bcc.ccc`, `Mdd.ddd`, `Ree.eee` and `Tff.fff` for accelerometer, barometer, magnetometer, RSSI and thermometer, respectively. GPS, if implemented, could be reported with `G1gg.ggggggG2hh.hhhhhhG3ii.iii` (lat, lon, height) at no more than 1 Hz. LDR, if implemented, could be reported with `Ljj.jjj`.
+
+Suggested reporting rates:
+
+* `GROUND_IDLE` states:
+  - Accelerometer: 2 Hz
+  - Magnetometer: 2 Hz
+  - Barometer: 2 Hz
+  - GPS: 0.2 Hz
+  - RSSI: 1 Hz
+
+* `GROUND_ARMED` state:
+  - Accelerometer: 33 Hz
+  - Barometer: 33 Hz
+  - Magnetometer: 2 Hz
+  - GPS: 1 Hz
+  - RSSI: 1 Hz
+
+* `AIRBORNE_OUTBOUND` and `_INBOUND` states:
+  - Accelerometer: 100 Hz
+  - Barometer: 100 Hz
+  - Magnetometer: None.
+  - GPS: 1 Hz
+  - RSSI: 1 Hz
+
+* `AIRBORNE_DEPLOYMENT` state:
+  - None.
+
+* `GROUND_RECOVERY` state:
+  - GPS: 1 Hz
+  - Magnetometer: 2 Hz
+  - RSSI: 10 Hz
+
 ### Control messages
 A few important control messages are given:
-* State machine transition
-* Configuration:
-  - Ground pressure
-  - Launch pad height
-  - Averaging interval
-  - Timeouts
-  - Accelerometer limits for launch and landing
-  - Magnetometer limit for RBF
+* State machine transition: `Sn`, where `n` is the state level to apply.
+* Configuration: `SET:x`, where `x` is one of the following:
+  - `G`: Ground pressure: `G:nnnn.nn`.
+  - `H`: Launch pad height: `H:nnn.n`.
+  - `A`: Averaging interval: `A:y:n`, where `y` indicates averaging for which device (`a`, `b`, `m`, `t`, `g`, `l` for accelerometer, barometer, magnetometer, thermometer, GPS and LDR, respectively).
+  - `T`: Timeouts
+  - `L`: Limits: `L:xx:yyyyy.yyyy`. `x` indicates which limit to set:
+    - `Ao`: accelerometer outbound (launch)
+    - `Ai`: accelerometer inbound (landing)
+    - `Bd`: barometer delta (launch and landing)
+    - `Md`: magnetometer delta (arm and recovery)
+* Ping: 
 
 State machine transition commands will be accepted at **any** time.
 
 Configuration will only occur during `IDLE` states (`STATE_GROUND_IDLE` and `STATE_GROUND_IDLE_ON_PAD`).
+
+Ping command will prompt a Pong reply. Mainly intended for RSSI measurements during recovery phase.
+
+
+# Proposals
+Some proposals for extended features:
+* Booster stage utilizing elastic luggage bands.
+* Payload padding (plastic foam).
+* Compressed air parachute deployment using an inflated water balloon and solenoid valve. Con: Balloon takes up space, solenoid is probably heavy.
+* *More to come*...
