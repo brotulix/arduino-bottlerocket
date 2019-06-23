@@ -324,6 +324,10 @@ A few important control messages are given:
 
 * Ping: `P`
 
+Every command ends with newline (`\n`).
+
+The maximum command line length is thus `SET:L:Bd:9999.9999\n` (19 characters). A command buffer of 32 characters is reserved, and an interrupt function should perhaps handle incoming data on serial line to make sure successive commands are not dropped/corrupted.
+
 State machine transition commands will be accepted at **any** time.
 
 Configuration will only occur during `IDLE` states (`STATE_GROUND_IDLE` and `STATE_GROUND_IDLE_ON_PAD`).
