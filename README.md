@@ -305,18 +305,19 @@ A few important control messages are given:
 
 * State machine transition: `Sn`, where `n` is the state level to apply (see above).
 
-* Configuration: `SET:x`, where `x` is one of the following:
+* Configuration: `Cx`, where `x` is one of the following:
   - `G`: Ground pressure: `G:nnnn.nn`.
   
   - `H`: Launch pad height: `H:nnn.n`.
   
-  - `A`: Averaging: `A:y:n`, where `y` is `a`, `b`, `m` for accelerometer, barometer, magnetometer, respectively, and `n` indicates how many samples to average over. Default is 10. Maximum depends on available memory.
+  - `A`: Averaging: `Ay:x`, where `y` is `a`, `b`, `m` for accelerometer, barometer, magnetometer, respectively, and `x` indicates how many samples to average over, in a single hex digit (0-F). Default is 9. Maximum depends on available memory.
   
   - `Tx:y.y`: Timeouts, where `x` is either
     - `o`: Outbound, or
     - `i`: Inbound
+    and `y.y` is a timeout in seconds (0.0 to 9.9).
 
-  - `L`: Limits: `L:xx:yyyyy.yyyy`. `x` indicates which limit to set:
+  - `L`: Limits: `Lxx:yyyyy.yyyy`. `xx` indicates which limit to set:
     - `Ao`: accelerometer outbound (launch)
     - `Ai`: accelerometer inbound (landing)
     - `Bd`: barometer delta (launch and landing)
@@ -326,7 +327,7 @@ A few important control messages are given:
 
 Every command ends with newline (`\n`).
 
-The maximum command line length is thus `SET:L:Bd:9999.9999\n` (19 characters). A command buffer of 32 characters is reserved, and an interrupt function should perhaps handle incoming data on serial line to make sure successive commands are not dropped/corrupted.
+The maximum command line length is thus `CLBd:9999.9999\n` (15 characters). A command buffer of 32 characters is reserved. An interrupt function should perhaps handle incoming data on serial line to make sure successive commands are not dropped/corrupted, and incoming commands are serviced as soon as a newline is encountered.
 
 State machine transition commands will be accepted at **any** time.
 

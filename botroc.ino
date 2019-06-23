@@ -33,14 +33,181 @@
 #define STATE_GROUND_RECOVERY       6   // ### Ground, recovery state
 #define STATE_GROUND_DATADUMP       7   // ### Ground, data-dump state
 
+#define COMMAND_LINE_BUFFER_SIZE    32
 
 Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
 
 byte sensorStatus = 0x0;
+
+char cmdline[COMMAND_LINE_BUFFER_SIZE] = { 0 };
+uint8_t cmdlength = 0;
+
 volatile byte stateMachineState = STATE_GROUND_IDLE;
 
 // Set a default sea level (= 0m ASL) pressure
 float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA;
+
+
+
+void parseCommandConfiguration()
+{
+    switch(cmdline[1])
+    {
+        case 'A': // Averaging
+        {
+            switch(cmdline[2])
+            {
+                case 'A': // Accelerometer
+                {
+                    break;
+                }
+
+                case 'B': // Barometer
+                {
+                    break;
+                }
+
+                case 'M': // Magnetometer
+                {
+                    break;
+                }
+
+                default:
+                    break;
+            }
+            break;
+        }
+        
+        case 'H': // Launch pad height
+        {
+            break;
+        }
+
+        case 'L': // Limits
+        {
+            switch(cmdline[2])
+            {
+                case 'A': // Accelerometer
+                {
+                    switch(cmdline[3])
+                    {
+                        case 'I': // Inbound
+                        {
+                            break;
+                        }
+                        
+                        case 'O': // Outbound
+                        {
+                            break;
+                        }
+
+                        default:
+                            break;
+
+                    }
+                    break;
+                }
+
+                case 'B': // Barometer
+                {
+                    break;
+                }
+
+                case 'M': // Magnetometer
+                {
+                    break;
+                }
+
+                default:
+                    break;
+            }
+            break;
+        }
+        
+        case 'T': // Timeouts
+        {
+            switch(cmdline[2])
+            {
+                case 'I': // Inbound
+                {
+                    break;
+                }
+
+                case 'O': // Outbound
+                {
+                    break;
+                }
+
+                default:
+                    break;
+            }
+            break;
+        }
+        
+        default:
+            break;
+    }
+}
+
+
+
+void parseCommand(void)
+{
+    uint8_t i = 0;
+    
+    for(i = 0; i < cmdlength; i++)
+    {
+        // Check for a complete command
+        if(cmdline[i] == '\n')
+        {
+            if(i == 0)
+            {
+                // A newline on its own is not a command.
+                // ...but it could be used to update RSSI?
+                return;
+            }
+
+            // We've got a newline, at least!
+            if(i > 1)
+            {
+                // It can theoretically be a command at only 2 bytes ("P\n")
+                switch(cmdline[0])
+                {
+                    case 'C': // Configuration
+                    {
+                        parseCommandConfiguration();
+                        break;
+                    }
+                    case 'P': // Ping
+                    {
+                        Serial.println("P");
+                        break;
+                    }
+                    
+                    case 'S': // State transition
+                    {
+                        i = cmdline[1] - 48;
+                        if(i >= 8)
+                        {
+                            // Error!
+                            Serial.println("E");
+                            break;
+                        }
+                        stateMachineState = i;
+                        break;
+                    }
+                    default:
+                    {
+                        Serial.println("0");
+                        break;
+                    }
+                } // switch(cmdline[0])
+            } // if(i > 1)
+        } // if(cmdline[i] == '\n')
+    } // for()
+} // parseCommand()
+
+
 
 void displaySensorDetails(void)
 {
@@ -57,10 +224,84 @@ void displaySensorDetails(void)
     Serial.println("");
 }
 
+
+
+void stateMachine()
+{
+    switch(stateMachineState)
+    {
+        case STATE_GROUND_IDLE_ON_PAD:
+        {
+            Serial.print("S");
+            Serial.println(STATE_GROUND_IDLE_ON_PAD);
+            break;
+        }
+        
+        case STATE_GROUND_ARMED:
+        {
+            Serial.print("S");
+            Serial.println(STATE_GROUND_ARMED);
+            break;
+        }
+        
+        case STATE_AIRBORNE_OUTBOUND:
+        {
+            Serial.print("S");
+            Serial.println(STATE_AIRBORNE_OUTBOUND);
+            break;
+        }
+        
+        case STATE_AIRBORNE_DEPLOYMENT:
+        {
+            Serial.print("S");
+            Serial.println(STATE_AIRBORNE_DEPLOYMENT);
+
+            stateMachineState = STATE_AIRBORNE_INBOUND;
+
+            break;
+        }
+        
+        case STATE_AIRBORNE_INBOUND:
+        {
+            Serial.print("S");
+            Serial.println(STATE_AIRBORNE_INBOUND);
+            break;
+        }
+        
+        case STATE_GROUND_RECOVERY:
+        {
+            Serial.print("S");
+            Serial.println(STATE_GROUND_RECOVERY);
+            break;
+        }
+        
+        case STATE_GROUND_DATADUMP:
+        {
+            Serial.print("S");
+            Serial.println(STATE_GROUND_DATADUMP);
+            break;
+        }
+
+        default:
+        case STATE_GROUND_IDLE:
+        {
+            Serial.print("S");
+            Serial.println(STATE_GROUND_IDLE);
+            break;
+        }
+    }
+}
+
+
+
+
 void setup()
 {
     Serial.begin(115200);
     Serial.println("setup() begins");
+
+    Serial.print("UART RX Buffer size: ");
+    Serial.println(SERIAL_RX_BUFFER_SIZE);
 
     Serial.println("Setting up pins...");
 
@@ -92,80 +333,42 @@ void setup()
 void loop()
 {
     sensors_event_t event;
+    uint8_t cmdlen = 0;
+    uint8_t i = 0;
 
     Serial.print("State: ");
     Serial.println(stateMachineState);
-
-    switch(stateMachineState)
-    {
-        case STATE_GROUND_IDLE_ON_PAD:
-        {
-            break;
-        }
-        
-        case STATE_GROUND_ARMED:
-        {
-            break;
-        }
-        
-        case STATE_AIRBORNE_OUTBOUND:
-        {
-            break;
-        }
-        
-        case STATE_AIRBORNE_DEPLOYMENT:
-        {
-            break;
-        }
-        
-        case STATE_AIRBORNE_INBOUND:
-        {
-            break;
-        }
-        
-        case STATE_GROUND_RECOVERY:
-        {
-            break;
-        }
-        
-        case STATE_GROUND_DATADUMP:
-        {
-            break;
-        }
-
-        default:
-        case STATE_GROUND_IDLE:
-        {
-            break;
-        }
-    }
-
-    Serial.println("Iter");
     
-    if(digitalRead(digitalPinToInterrupt(INTSRC_BAROMETER))) 
+    // Check for commands
+    cmdlen = Serial.available();
+    if(cmdlen > 0)
     {
-        // Barometer ready
-        Serial.println("Barometer data ready");
+        Serial.print(cmdlen);
+        Serial.println(" bytes command line");
+        
+        if(cmdlength + cmdlen >= COMMAND_LINE_BUFFER_SIZE)
+        {
+            Serial.println("UART buffer read would overshoot command buffer length.");
+            cmdlen = COMMAND_LINE_BUFFER_SIZE - cmdlength;
+        }
+
+        i = Serial.readBytes((char*)(&cmdline + cmdlength), cmdlen);
+        
+        if(i < cmdlen)
+        {
+            Serial.println("Only read ");
+            Serial.print(i);
+            Serial.println(" bytes!");
+        }
+
+        cmdlength += i;
+
     }
 
-    if(digitalRead(digitalPinToInterrupt(INTSRC_THERMOMETER))) 
-    {
-        // Thermometer ready
-        Serial.println("Thermometer data ready");
-    }
+    parseCommand();
 
-    if(digitalRead(digitalPinToInterrupt(INTSRC_ACCELEROMETER))) 
-    {
-        // Accelerometer ready
-        Serial.println("Accelerometer data ready");
-    }
+    stateMachine();
 
-    if(digitalRead(digitalPinToInterrupt(INTSRC_MAGNETOMETER))) 
-    {
-        // Magnetometer ready
-        Serial.println("Magnetometer data ready");
-    }
-    
     bmp.getEvent(&event);
 
     if(event.pressure)
@@ -195,5 +398,5 @@ void loop()
         Serial.println("Sensor event error");
     }
     
-    delay(10000);
+    delay(1000);
 }
