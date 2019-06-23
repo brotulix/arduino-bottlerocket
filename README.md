@@ -16,7 +16,7 @@ Earlier tests have shown that a simple parachute ejector using a curved PET sect
 # Initial solution proposal
 Earlier tests have shown that it is indeed possible to detect the apex using sign inversion of barometric delta, which will indicate that the rocket has begun its descent. After arming and a sustained negative delta pressure, it is also fairly safe to assume apex has been reached when delta pressure reaches zero.
 
-A new solution for parachute deployment is adviced: A simple tube containing the chute itself and a captive spring (with end cap same-ish diameter as tube ID), plus another end cap (preferrably captive; could be attached to parachute string) that is held in place by a pin to be extracted by servo or linear actuator (the head driver from a CD-ROM drive is suggested as light-weight linear actuator).
+A new solution for parachute deployment is advised: A simple tube containing the chute itself and a captive spring (with end cap same-ish diameter as tube ID), plus another end cap (preferrably captive; could be attached to parachute string) that is held in place by a pin to be extracted by servo or linear actuator (the head drive motor from a CD-ROM drive is suggested as light-weight linear actuator).
 
 If the rocket is, as with latest model, painted white, an audiovisual beacon can be achieved using a simple superbright LED lighting the payload compartment from within. A assault alarm buzzer/siren can be utilized for audible assist. Upon receiving a keyword over telemetry link, the beacon mode should disengage to avoid angry neighbours and hearing problems.
 
@@ -83,45 +83,6 @@ Various electronic components intended for inclusion:
 * 150 g - Rocket body with payload capsule
 *  30 g - Various mechanical assemblages (eg. parachute deployment)
 = 250 g Total
-
-# Equations
-Energy needed to move our estimated 250 g rocket to a height of, say, 30 meters:
-Ep = Ek
-mgh = (mv^2)/2
-
-Ep = mgh = 0.25 * 9.81 * 30 [kg * m/(s^2) * m]
-Ep = 73.575 [kg * m/(s^2) * m]
-Ep = 73.575 [Nm]
-Ep = 73.575 [J]
-
-F = ma
-=> a = F/m
-a = 183.22 / 0.25 [F/m]
-a = 732.88 [m/s^2]
-
-v = a*t
-v = 732.88 * X [m/s^2 * s]
-v = ???
-
-Ek = 0.5 * 0.25 * v^2
-Ek = ???
-
-
-Pressure in vessel:
-5 bar = 5.09858 kg/cm^2
-= 500kPa
-= 500kN/m^2
-= 500k * 0.01 * 0.01 [N/cm^2]
-= 50 [N/cm^2]
-
-Bottle opening:
-Diameter: 21.6 mm
-Area: pi*((2.16cm)/2)^2) = 3.6644 cm^2
-
-Initial force:
-F = 50 * 3.6644 [N/cm^2 * cm^2 = N]
-F = 183.22 [N]
-(kgf = ~= 18 [kg])
 
 # System overview
 The launch control/monitoring system likely consists of two parts: The launched vessel, and a ground station.
@@ -370,9 +331,93 @@ Configuration will only occur during `IDLE` states (`STATE_GROUND_IDLE` and `STA
 Ping command will prompt a Pong reply. Mainly intended for RSSI measurements during recovery phase.
 
 
+# Equations
+***Warning***: Here be dragons, errors and bad, bad numbers.
+
+## Energy ##
+
+Energy needed to move our estimated 250 g loaded rocket to a height of, say, 30 meters:
+
+<!-- abcdefg = https://latex.codecogs.com/svg.latex?\Large&space; -->
+
+Potential and kinetic energy:
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{p}=E_{k}" title="Ep = Ek" />
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;mgh = \frac{{mv}^{2}}{2}" title="mgh = (mv^2)/2"/>
+
+Potential energy:
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{p} = mgh = 0.25 \times 9.81 \times 30 [kg \times \frac{m}{{s}^{2}} \times m]" title="Ep = mgh = 0.25 * 9.81 * 30 [kg * m/(s^2) * m]"/>
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{p} = 73.575 [kg \times \frac{m}{{s}^{2}} \times m]" title="Ep = 73.575 [kg * m/(s^2) * m]"/>
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{p} = 73.575 [Nm]" title="Ep = 73.575 [Nm]"/>
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{p} = 73.575 [J]" title="Ep = 73.575 [J]"/>
+
+
+Force:
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;F = ma \implies a = \frac{F}{m}" title="F = ma => a = F/m"/>
+
+<!-- *All wrong*
+- <img src="abcdefga = \frac{183.22}{0.25} [\frac{N}{kg}]" title="a = 183.22 / 0.25 [N/kg]"/>
+
+- <img src="abcdefga = 732.88 []" title="a = 732.88 [m/s^2]"/>
+-->
+
+
+Velocity:
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;v = a \times t" title="v = a*t"/>
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;v = ?" title="v = ???"/>
+
+
+Kinetic energy:
+
+<img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{k} = 0.5 * 0.25 * {v}^{2}" title="Ek = 0.5 * 0.25 * v^2"/>
+
+<img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{k} = ?" title="Ek = ???"/>
+
+
+
+## Pressure in vessel ##
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;5{bar}=5.09858 [\frac{kg}{{cm}^{2}}]" title="5 bar = 5.09858 kg/cm^2"/>
+ 
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;=500k [Pa]" title="= 500k [Pa]"/>
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;=500k[\frac{N}{m^{2}}]" title="= 500kN/m^2"/>
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;=500k\times{0.01}^{2}[\frac{N}{cm^2}]" title="= 500k * 0.01 * 0.01 [N/cm^2]"/>
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;=50[\frac{N}{{cm}^{2}}]" title="= 50 [N/cm^2]"/>
+
+
+## Bottle opening ##
+
+Diameter: 21.6 mm
+
+Area: <img src="https://latex.codecogs.com/svg.latex?\Large&space;\pi{\frac{2.16cm}{2}}^{2}=3.6644{cm}^{2}" title="pi*((2.16cm)/2)^2) = 3.6644 cm^2" />
+
+
+## Initial force ##
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;F = 50 \times 3.6644 [\frac{N}{{cm}^{2}} \times {cm}^{2} = N" title="F = 50 * 3.6644 [N/cm^2 * cm^2 = N]" />
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;F = 183.22 [N]" title="F = 183.22 [N]" />
+
+- <img src="https://latex.codecogs.com/svg.latex?\Large&space;kgf \approx 18 [kg]" title="(kgf = ~= 18 [kg])" />
+
+
+
 # Proposals
 Some proposals for extended features:
 * Booster stage utilizing elastic luggage bands.
 * Payload padding (plastic foam).
 * Compressed air parachute deployment using an inflated water balloon and solenoid valve. Con: Balloon takes up space, solenoid is probably heavy.
 * *More to come*...
+
+
