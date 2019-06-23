@@ -150,7 +150,13 @@ Listen for commands only.
 Ignore RBF ("Remove Before Flight") presence.
 
 ### Ground, on-pad idle state
-Whenever power is applied, enter this state. The system should be power conservative. A simple, occational reporting of (ground-level) averaged air pressure, gravitational vector and battery voltage. Command input must be accepted through RF link. An optical or magnetic switch could be employed to arm the rocket for launch ("Remove before flight"), or a command could be sent through RF link to transition to armed state.
+Whenever power is applied, enter this state. The system should be power conservative. A simple, occational reporting of (ground-level) averaged air pressure, gravitational vector and battery voltage. Command input must be accepted through RF link. This is the time to configure system parameters such as:
+* Sea level pressure of the moment
+* Height of launch pad (default launch site is approx. 7.6m ASL according to norgeskart.no).
+* Number of readings to average over.
+* Panic time-out.
+
+An optical or magnetic switch could be employed to arm the rocket for launch ("Remove before flight"), or a command could be sent through RF link to transition to armed state.
 
 ### Ground, armed state
 In armed state, the rocket is simply waiting to leave the ground, and must therefore keep a constant watch on the accelerometer to detect changes in acceleration vector. Again, a magnet or optical link could be employed to make it clear that the rocket has left the launch pad, transitioning to the airborne outbound state.
@@ -158,6 +164,9 @@ In armed state, the rocket is simply waiting to leave the ground, and must there
 ### Airborne, outbound state
 Now the air pressure should be kept under constant surveillance. All values should be reported back to ground control, or possibly a slight averaging could be employed to reduce time spent in TX.
 When the air pressure derivative becomes positive, transition to airborne deployment state.
+Two possible backup conditions for transition to airborne deployment state:
+* Ground control command.
+* A simple flight-timer; after a certain time spent in airborne outbound state a transition **will** occur. Current flight tests indicate time spent airborne is around 5 seconds, so a timeout of 3.5 seconds may allow for at least a mildly decelerated landing in case of other trigger failures.
 
 ### Airborne, deployment state
 Simply trigger the parachute deployment, then transition to airborne inbound state.
@@ -178,6 +187,11 @@ Insert diagram here.
 
 # Hardware/Software tests
 ## Arduino
+### Programming Arduino board
+Programming the Arduino Nano board proves to be a little tricky as it doesn't seem to work directly from Arduino, and thus neither from Visual Studio Code's Arduino plugin.
+The current solution is to use an AVR Dragon and program the Nano via ISP, using the following command from the git repo root (eg. `~/source/arduino-bottlerocket/`):
+`~/.arduino15/packages/arduino/tools/avrdude/6.3.0-arduino14/bin/avrdude -C ~/.arduino15/packages/arduino/tools/avrdude/6.3.0-arduino14/etc/avrdude.conf -v -pm328p -c dragon_isp -Uflash:w:build/botroc.ino.with_bootloader.hex:i`
+
 ### Power draw
 Power draw in all states.
 
@@ -250,4 +264,3 @@ Idle, erasing/writing, reading.
 ### Power draw
 Idle and active states, audio and visual.
 
-## 
