@@ -187,13 +187,15 @@ Insert diagram here.
 
 # Hardware/Software tests
 ## Arduino
+Starting out with an Arduino Nano V3.0 board (6.0 g, ATMega328P), since it lends itself well to breadboard prototyping. I also have an Arduino-esque board marked *Deek-Robot* which is well suited for the final product (2.4 g, ATMega328P).
+
 ### Programming Arduino board
 Programming the Arduino Nano board proves to be a little tricky as it doesn't seem to work directly from Arduino, and thus neither from Visual Studio Code's Arduino plugin.
 The current solution is to use an AVR Dragon and program the Nano via ISP, using the following command from the git repo root (eg. `~/source/arduino-bottlerocket/`):
 `~/.arduino15/packages/arduino/tools/avrdude/6.3.0-arduino14/bin/avrdude -C ~/.arduino15/packages/arduino/tools/avrdude/6.3.0-arduino14/etc/avrdude.conf -v -pm328p -c dragon_isp -Uflash:w:build/botroc.ino.with_bootloader.hex:i`
 
 ### Power draw
-Power draw in all states.
+*Measure power draw in all states*.
 
 ## RF Link
 ### Transfer rate
@@ -201,8 +203,8 @@ Power draw in all states.
 ### RSSI (beacon mode)
 ### Power draw
 
-## Note on sensor board
-For sensors, a single GY-80 board can be used, as it has the following sensors:
+## Sensor board
+A single GY-80 board can be used, as it has the following sensors:
 * BMP085 Baro- and thermometer
 * ADXL345 Accelerometer
 * L3G4200D Gyrometer
@@ -224,6 +226,9 @@ Pins from the top, as seen with the pin header inserted into bread board and chi
 Pin 1 and 2 indicates an on-board voltage regulator, but to save some power, we should probably used 3.3 V directly from the Arduino.
 
 So in summary, we probably want to monitor at least three interrupt sources. Maybe we need to connect to a a common interrupt pin with resistors and use one interrupt routine that reads the digital pins to figure out which of the pins triggered interrupt.
+
+### Power draw
+*Measure power draw*.
 
 ### Barometer
 #### Power draw
@@ -264,3 +269,31 @@ Idle, erasing/writing, reading.
 ### Power draw
 Idle and active states, audio and visual.
 
+# Communication
+## Protocol
+Some form of communication protocol must be in place to send control messages and receive status messages from the vessel.
+
+### Status messages
+Some status messages are given, such as
+* Accelerometer reading
+* Pressure reading
+* Temperature reading
+* State machine state
+* GPS data (optional)
+
+During debugging, it would be nice to know a little about what the state machine is doing, so a debug statement would also be handy.
+
+### Control messages
+A few important control messages are given:
+* State machine transition
+* Configuration:
+  - Ground pressure
+  - Launch pad height
+  - Averaging interval
+  - Timeouts
+  - Accelerometer limits for launch and landing
+  - Magnetometer limit for RBF
+
+State machine transition commands will be accepted at **any** time.
+
+Configuration will only occur during `IDLE` states (`STATE_GROUND_IDLE` and `STATE_GROUND_IDLE_ON_PAD`).
