@@ -305,29 +305,29 @@ A few important control messages are given:
 
 * State machine transition: `Sn`, where `n` is the state level to apply (see above).
 
-* Configuration: `Cx`, where `x` is one of the following:
-  - `G`: Ground pressure: `G:nnnn.nn`.
+* Configuration: `CX`, where `X` is one of the following:
+  - `G`: Ground pressure: `Gnnnn.nn`.
   
-  - `H`: Launch pad height: `H:nnn.n`.
+  - `H`: Launch pad height: `Hnnn.n`.
   
-  - `A`: Averaging: `Ay:x`, where `y` is `a`, `b`, `m` for accelerometer, barometer, magnetometer, respectively, and `x` indicates how many samples to average over, in a single hex digit (0-F). Default is 9. Maximum depends on available memory.
+  - `A`: Averaging: `AX:y`, where `X` is `A`, `B`, `M` for accelerometer, barometer, magnetometer, respectively, and `y` indicates how many samples to average over, in a single hex digit (0-F). Default is 9. Maximum depends on available memory.
   
-  - `Tx:y.y`: Timeouts, where `x` is either
-    - `o`: Outbound, or
-    - `i`: Inbound
+  - `TXy.y`: Timeouts, where `X` is either
+    - `O`: Outbound, or
+    - `I`: Inbound
     and `y.y` is a timeout in seconds (0.0 to 9.9).
 
-  - `L`: Limits: `Lxx:yyyyy.yyyy`. `xx` indicates which limit to set:
-    - `Ao`: accelerometer outbound (launch)
-    - `Ai`: accelerometer inbound (landing)
-    - `Bd`: barometer delta (launch and landing)
-    - `Md`: magnetometer delta (arm and recovery)
+  - `L`: Limits: `LXXyyyyy.yyyy`. `XX` indicates which limit to set:
+    - `AO`: accelerometer outbound (launch)
+    - `AI`: accelerometer inbound (landing)
+    - `B`: barometer delta (launch and landing)
+    - `M`: magnetometer delta (arm and recovery)
 
 * Ping: `P`
 
 Every command ends with newline (`\n`).
 
-The maximum command line length is thus `CLBd:9999.9999\n` (15 characters). A command buffer of 32 characters is reserved. An interrupt function should perhaps handle incoming data on serial line to make sure successive commands are not dropped/corrupted, and incoming commands are serviced as soon as a newline is encountered.
+The maximum command line length is thus `CLAI9999.9999\n` (14 characters). A command buffer of 32 characters is reserved. An interrupt function should perhaps handle incoming data on serial line to make sure successive commands are not dropped/corrupted, and incoming commands are serviced as soon as a newline is encountered.
 
 State machine transition commands will be accepted at **any** time.
 
@@ -420,9 +420,11 @@ Area: <img src="https://latex.codecogs.com/svg.latex?\Large&space;\pi{\frac{2.16
 
 # Proposals
 Some proposals for extended features:
-* Booster stage utilizing elastic luggage bands.
+* Grease the release mechanism for a potentially easier launch triggering.
+* Booster stage utilizing elastic luggage bands. Uncertain if we'll gain anything, or if it'll *only* complicate things.
 * Payload padding (plastic foam).
 * Compressed air parachute deployment using an inflated water balloon and solenoid valve. Con: Balloon takes up space, solenoid is probably heavy.
+* In case of noisy UART over 433 MHz: Add a few characters that signals start of a command, eg. `<SP><SP><SP>S6<LF>` to enter `STATE_GROUND_RECOVERY`.
 * *More to come*...
 
 

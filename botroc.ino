@@ -49,13 +49,13 @@ float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA;
 
 
 
-void parseCommandConfiguration()
+uint8_t parseCommandConfiguration(uint8_t j)
 {
-    switch(cmdline[1])
+    switch(cmdline[j++])
     {
         case 'A': // Averaging
         {
-            switch(cmdline[2])
+            switch(cmdline[j++])
             {
                 case 'A': // Accelerometer
                 {
@@ -85,11 +85,11 @@ void parseCommandConfiguration()
 
         case 'L': // Limits
         {
-            switch(cmdline[2])
+            switch(cmdline[j++])
             {
                 case 'A': // Accelerometer
                 {
-                    switch(cmdline[3])
+                    switch(cmdline[j++])
                     {
                         case 'I': // Inbound
                         {
@@ -126,7 +126,7 @@ void parseCommandConfiguration()
         
         case 'T': // Timeouts
         {
-            switch(cmdline[2])
+            switch(cmdline[j++])
             {
                 case 'I': // Inbound
                 {
@@ -147,6 +147,8 @@ void parseCommandConfiguration()
         default:
             break;
     }
+
+    return j;
 }
 
 
@@ -154,6 +156,7 @@ void parseCommandConfiguration()
 void parseCommand(void)
 {
     uint8_t i = 0;
+    uint8_t j = 0;
     
     for(i = 0; i < cmdlength; i++)
     {
@@ -162,22 +165,20 @@ void parseCommand(void)
         {
             if(i == 0)
             {
-                // A newline on its own is not a command.
-                // ...but it could be used to update RSSI?
-                return;
             }
 
             // We've got a newline, at least!
             if(i > 1)
             {
                 // It can theoretically be a command at only 2 bytes ("P\n")
-                switch(cmdline[0])
+                switch(cmdline[j++])
                 {
                     case 'C': // Configuration
                     {
-                        parseCommandConfiguration();
+                        j = parseCommandConfiguration(j);
                         break;
                     }
+
                     case 'P': // Ping
                     {
                         Serial.println("P");
@@ -186,7 +187,7 @@ void parseCommand(void)
                     
                     case 'S': // State transition
                     {
-                        i = cmdline[1] - 48;
+                        i = cmdline[j++] - 48;
                         if(i >= 8)
                         {
                             // Error!
@@ -196,13 +197,34 @@ void parseCommand(void)
                         stateMachineState = i;
                         break;
                     }
+                    
                     default:
                     {
-                        Serial.println("0");
+                        Serial.println("_");
                         break;
                     }
                 } // switch(cmdline[0])
             } // if(i > 1)
+
+            Serial.print("pC: LF at: ");
+            Serial.println(i);
+            Serial.print("pC: utilized command length: ");
+            Serial.println(j);
+
+            // cmdline = "\nS1\nCLAI1030.0000\nHADET"
+            // cmdlength = 23
+            for(j = 0; j < (cmdlength - (1 + i)); j++)
+            {
+                cmdline[j] = cmdline[j + 1];
+            }
+            cmdline[cmdlength] = '\0';
+            cmdlength -= 1 + i;
+
+            Serial.print("pC: cmdline now has ");
+            Serial.print(cmdlength);
+            Serial.println(" byte remaining");
+
+            
         } // if(cmdline[i] == '\n')
     } // for()
 } // parseCommand()
@@ -294,6 +316,39 @@ void stateMachine()
 
 
 
+void grabSerial()
+{
+    uint8_t cmdlen = 0;
+    uint8_t i = 0;
+    
+    // Check for commands
+    cmdlen = Serial.available();
+    if(cmdlen > 0)
+    {
+        Serial.print(cmdlen);
+        Serial.println(" bytes command line");
+        
+        if(cmdlength + cmdlen >= COMMAND_LINE_BUFFER_SIZE)
+        {
+            Serial.println("UART buffer read would overshoot command buffer length.");
+            cmdlen = COMMAND_LINE_BUFFER_SIZE - cmdlength;
+        }
+
+        i = Serial.readBytes((char*)(&cmdline + cmdlength), cmdlen);
+        
+        if(i < cmdlen)
+        {
+            Serial.println("Only read ");
+            Serial.print(i);
+            Serial.println(" bytes!");
+        }
+
+        cmdlength += i;
+
+    }
+
+}
+
 
 void setup()
 {
@@ -333,37 +388,11 @@ void setup()
 void loop()
 {
     sensors_event_t event;
-    uint8_t cmdlen = 0;
-    uint8_t i = 0;
 
     Serial.print("State: ");
     Serial.println(stateMachineState);
     
-    // Check for commands
-    cmdlen = Serial.available();
-    if(cmdlen > 0)
-    {
-        Serial.print(cmdlen);
-        Serial.println(" bytes command line");
-        
-        if(cmdlength + cmdlen >= COMMAND_LINE_BUFFER_SIZE)
-        {
-            Serial.println("UART buffer read would overshoot command buffer length.");
-            cmdlen = COMMAND_LINE_BUFFER_SIZE - cmdlength;
-        }
-
-        i = Serial.readBytes((char*)(&cmdline + cmdlength), cmdlen);
-        
-        if(i < cmdlen)
-        {
-            Serial.println("Only read ");
-            Serial.print(i);
-            Serial.println(" bytes!");
-        }
-
-        cmdlength += i;
-
-    }
+    grabSerial();
 
     parseCommand();
 
