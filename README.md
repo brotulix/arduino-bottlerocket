@@ -343,11 +343,17 @@ Ping command will prompt a Pong reply. Mainly intended for RSSI measurements dur
 
 Energy needed to move our estimated 250 g loaded rocket to a height of, say, 30 meters:
 
-<!-- abcdefg = https://latex.codecogs.com/svg.latex?\Large&space; -->
+<!--
+Create equations here:
+https://www.codecogs.com/latex/eqneditor.php
+Then save as .svg.
+GitHub doesn't cooperate very well with directly embedded images with url as such:
+https://latex.codecogs.com/svg.latex?\Large&space;
+-->
 
 Potential and kinetic energy:
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{p}=E_{k}" title="Ep = Ek" />
+- <img src="doc/equations/Eq_001.svg " title="Ep = Ek" />
 
 - <img src="https://latex.codecogs.com/svg.latex?\Large&space;mgh = \frac{{mv}^{2}}{2}" title="mgh = (mv^2)/2"/>
 
