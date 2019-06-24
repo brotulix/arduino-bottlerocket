@@ -185,10 +185,29 @@ The current solution is to use an AVR Dragon and program the Nano via ISP, using
 
 
 ## RF Link
+The RF link currently chosen for the project is an old-ish 433 MHz module from Deal Extreme, the only markings being `TLC1101_V2.1`. It is based on the Texas Instruments chip [`CC110L`](https://www.ti.com/lit/ds/symlink/cc110l.pdf).
+
+Some of its highlights are:
+* Programmable output power, up to +12dBm.
+* Programmable data rate from 600 to 600k bps.
+* Supports several different modulations: 2- and 4-FSK, GFSK, MSK and OOK.
+
+Other modules using this chip have been found ([here's one example](http://www.yesyes.info/index.php/electronics/rf1100-232-rf-433mhz-transceiver-module/)). It is claimed to require 5V input, and that the sleep mode does not work.
+
 ### Transfer rate
+The board supposedly accepts a simple UART RX/TX connection, making it easy to interface with the Arduino. The 433 MHz is claimed to be able to operate at a baud rates of 4800, 9600 or 19200, using one of 256 selectable channels.
+
 ### Range
+TBD.
+
+Antenna designs to be evaluated. Clover leaf or helical antennas may be feasible using thin wire taped to the inside of the payload capsule.
+
+Ground control antenna could be a clover leaf or helical for stationary use, and a yagi for direction finding in recovery.
+
 ### RSSI (beacon mode)
+
 ### Power draw
+TI's data sheet indicates that the CC110L alone draws about 30mA in +10dBm transmit mode. The board also has an AtMega48 chip.
 
 
 
@@ -198,8 +217,6 @@ A single GY-80 board can be used, as it has the following sensors:
 * ADXL345 Accelerometer
 * L3G4200D Gyrometer
 * HMC5883L Magnetometer
-
-
 
 ### Sensor board connections
 Pins from the top, as seen with the pin header inserted into bread board and chips visible, with mounting holes to the right:
@@ -218,21 +235,23 @@ Pin 1 and 2 indicates an on-board voltage regulator, but to save some power, we 
 
 So in summary, we probably want to monitor at least three interrupt sources. Maybe we need to connect to a a common interrupt pin with resistors and use one interrupt routine that reads the digital pins to figure out which of the pins triggered interrupt.
 
-
-
 ### Power draw
 *Measure power draw*.
 
 ### Barometer
-#### Power draw
+The Adafruit library reads barometer pressure values as float. Using `uint16_t` instead may allow us to get enough precision and save some (global) memory by keeping the float value a local variable during sensor input only.
+
 #### Noise
 #### Averaging
 #### Ascent detection
 #### Apex detection
 #### Descent detection
 
+### Thermometer
+#### Noise
+#### Averaging
+
 ### Accelerometer
-#### Power draw
 #### Noise
 #### Averaging
 #### Apex detection
@@ -240,7 +259,6 @@ So in summary, we probably want to monitor at least three interrupt sources. May
 #### Touchdown detection
 
 ### Magnetometer (RBF)
-#### Power draw
 #### Noise
 #### Averaging
 #### RBF Detection
@@ -249,15 +267,16 @@ So in summary, we probably want to monitor at least three interrupt sources. May
 
 ## Flash memory
 Write only full pages to avoid/minimize data loss.
+
 How many erase/write cycles can be expected?
-
-
 
 ### Power draw
 Idle, erasing/writing, reading.
 
 
 ## GPS
+The lightest GPS module in my possession at the moment is a (fake?) ublox Neo 6M with a replaced, external chip antenna. It is configurable to higher baud rates, but will not store its settings.
+
 ### Power draw
 ### Accuracy
 ### Update rate
@@ -267,16 +286,14 @@ Idle, erasing/writing, reading.
 
 ## Audio-visual beacon
 
-
-
 ### Power draw
 Idle and active states, audio and visual.
 
 
 
 
-# Communication
 
+# Communication
 
 ## Protocol
 Some form of communication protocol must be in place to send control messages and receive status messages from the vessel.

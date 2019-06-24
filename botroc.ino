@@ -33,8 +33,17 @@
 #define STATE_GROUND_RECOVERY       6   // ### Ground, recovery state
 #define STATE_GROUND_DATADUMP       7   // ### Ground, data-dump state
 
-#define COMMAND_LINE_BUFFER_SIZE    32
-#define COMMAND_LINE_APPEND_THRESHOLD   ((COMMAND_LINE_BUFFER_SIZE / 4) * 3)
+#define COMMAND_LINE_BUFFER_SIZE            32
+#define COMMAND_LINE_APPEND_THRESHOLD       ((COMMAND_LINE_BUFFER_SIZE / 4) * 3)
+
+#define SENSORS_BAROMETER_NUM_VALUES        16
+#define SENSORS_BAROMETER_SEALEVELHPA       SENSORS_PRESSURE_SEALEVELHPA
+
+#define SENSORS_ACCELEROMETER_NUM_VALUES    16
+
+#define SENSORS_MAGNETOMETER_NUM_VALUES     16
+
+
 
 Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
 
@@ -43,12 +52,130 @@ byte sensorStatus = 0x0;
 char cmdline[COMMAND_LINE_BUFFER_SIZE] = { 0 };
 uint8_t cmdlength = 0;
 
-volatile byte stateMachineState = STATE_GROUND_IDLE;
+uint16_t sensorBarometerValues[SENSORS_BAROMETER_NUM_VALUES] = { 0 };
+uint16_t sensorAccelerometerValues[SENSORS_ACCELEROMETER_NUM_VALUES] = { 0 };
+uint16_t sensorMagnetometerValues[SENSORS_MAGNETOMETER_NUM_VALUES] = { 0 };
+
+uint16_t sensorBarometerAverage = 0;
+uint16_t sensorAccelerometerAverage = 0;
+uint16_t sensorMagnetometerAverage = 0;
+
+uint8_t sensorBarometerReadings = 0;
+uint8_t sensorBarometerNextReading = 0;
+
+uint8_t sensorAccelerometerReadings = 0;
+uint8_t sensorAccelerometerNextReading = 0;
+
+uint8_t sensorMagnetometerReadings = 0;
+uint8_t sensorMagnetometerNextReading = 0;
+
+byte stateMachineState = STATE_GROUND_IDLE;
 
 // Set a default sea level (= 0m ASL) pressure
 float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA;
 
 float launchPadHeight = 0.0;
+
+void sensorBarometerCalculateAverage()
+{
+    uint8_t i = 0;
+    unsigned long sum = 0;
+    float result = 0.0;
+    unsigned long after = 0;
+    unsigned long before = millis();
+
+    for(i = 0; i < sensorBarometerReadings; i++)
+    {
+        sum += sensorBarometerValues[i];
+    }
+    result = sum / (i * 1.0);
+    sensorBarometerAverage = (uint16_t)result;
+    after = millis();
+    Serial.print("Calculating barometer average took ");
+    Serial.print(after-before);
+    Serial.print("ms for ");
+    Serial.print(i);
+    Serial.println(" values:");
+
+    for(i = 0; i < sensorBarometerReadings; i++)
+    {
+        Serial.print(i);
+        Serial.print(": ");
+        Serial.print(sensorBarometerValues[i]);
+        Serial.println(" Pa");
+    }
+
+}
+
+void sensorBarometerAppendValue()
+{
+    sensorBarometerValues[sensorBarometerNextReading] = sensorBarometerReadPressure();
+    sensorBarometerNextReading = (sensorBarometerNextReading + 1) & 0xF;
+    if(sensorBarometerReadings < SENSORS_BAROMETER_NUM_VALUES)
+    {
+        sensorBarometerReadings++;
+    }
+}
+
+uint16_t sensorBarometerReadPressure()
+{
+    sensors_event_t event;
+
+    bmp.getEvent(&event);
+
+    if(event.pressure)
+    {
+        return((uint16_t)(event.pressure * 100));
+    }
+    else
+    {
+        Serial.println("Sensor event error");
+        return 0;
+    }
+}
+
+void sensorBarometerGetHeightASL()
+{
+    sensors_event_t event;
+
+    bmp.getEvent(&event);
+
+    if(event.pressure)
+    {
+        /* Then convert the atmospheric pressure, and SLP to altitude         */
+        /* Update this next line with the current SLP for better results      */
+        Serial.print("Altitude:    "); 
+        Serial.print(bmp.pressureToAltitude(seaLevelPressure, event.pressure)); 
+        Serial.println(" m");
+        Serial.println("");
+    }
+    else
+    {
+        Serial.println("Sensor event error");
+    }
+}
+
+void sensorBarometerReadTemperature()
+{
+    sensors_event_t event;
+
+    bmp.getEvent(&event);
+
+    if(event.temperature)
+    {
+        /* First we get the current temperature from the BMP085 */
+        float temperature;
+        bmp.getTemperature(&temperature);
+        Serial.print("Temperature: ");
+        Serial.print(temperature);
+        Serial.println(" C");
+    }
+    else
+    {
+        Serial.println("Sensor event error");
+    }
+}
+
 
 
 
@@ -321,6 +448,16 @@ uint8_t parseCommand(void)
                 Serial.println(millis());
                 Serial.print("Command buffer length: ");
                 Serial.println(cmdlength);
+
+                sensorBarometerAppendValue();
+                sensorBarometerCalculateAverage();
+                Serial.print("Average: ");
+                Serial.print(sensorBarometerAverage);
+                Serial.println(" Pa");
+                //sensorBarometerReadPressure();
+                sensorBarometerReadTemperature();
+                //sensorBarometerGetHeightASL();
+                
                 return i;
                 break;
             }
@@ -547,7 +684,6 @@ void setup()
 
 void loop()
 {
-    sensors_event_t event;
     uint8_t i = 0;
 
     grabSerial();
@@ -562,34 +698,6 @@ void loop()
     stateMachine();
 
 #if 0
-    bmp.getEvent(&event);
-
-    if(event.pressure)
-    {
-        /* Display atmospheric pressue in hPa */
-        Serial.print("Pressure:    ");
-        Serial.print(event.pressure);
-        Serial.println(" hPa");
-        
-        /* First we get the current temperature from the BMP085 */
-        float temperature;
-        bmp.getTemperature(&temperature);
-        Serial.print("Temperature: ");
-        Serial.print(temperature);
-        Serial.println(" C");
-
-        /* Then convert the atmospheric pressure, and SLP to altitude         */
-        /* Update this next line with the current SLP for better results      */
-        Serial.print("Altitude:    "); 
-        Serial.print(bmp.pressureToAltitude(seaLevelPressure,
-                                            event.pressure)); 
-        Serial.println(" m");
-        Serial.println("");
-    }
-    else
-    {
-        Serial.println("Sensor event error");
-    }
 #endif // if 0
     
     delay(10);
