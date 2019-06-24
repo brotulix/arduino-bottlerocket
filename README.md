@@ -353,7 +353,7 @@ https://latex.codecogs.com/svg.latex?\Large&space;
 
 Potential and kinetic energy:
 
-- <img src="doc/equations/Eq_001.svg " title="Ep = Ek" />
+- <img src="doc/equations/Eq_001.svg" title="Ep = Ek" />
 
 - <img src="doc/equations/Eq_002.svg" title="mgh = (mv^2)/2"/>
 
