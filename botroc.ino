@@ -153,6 +153,44 @@ uint8_t parseCommandConfiguration(uint8_t j)
 
 
 
+/** Remove all characters in array up to the specified character.
+ * @param   i   The last character to remove (eg. linefeed).
+ */
+void stripCommand(uint8_t i)
+{
+    uint8_t j = 0;
+
+    if(i >= COMMAND_LINE_BUFFER_SIZE)
+    {
+        // This is an error, but we "solve" it by clearing the whole buffer.
+        i = COMMAND_LINE_BUFFER_SIZE - 1;
+    }
+
+    // Shift the rest of the command buffer to the left
+    for(j = 0; j < (COMMAND_LINE_BUFFER_SIZE - (1 + i)); j++)
+    {
+        cmdline[j] = cmdline[j + 1];
+    }
+    
+    // Clear the rest of the command buffer
+    for(; j < COMMAND_LINE_BUFFER_SIZE; j++)
+    {
+        cmdline[j] = '\0';
+    }
+    
+    // Decrement length counter
+    if(cmdlength < 1 + i)
+    {
+        cmdlength = 0;
+    }
+    else
+    {
+        cmdlength -= 1 + i;
+    }
+}
+
+
+
 void parseCommand(void)
 {
     uint8_t i = 0;
@@ -163,11 +201,6 @@ void parseCommand(void)
         // Check for a complete command
         if(cmdline[i] == '\n')
         {
-            if(i == 0)
-            {
-            }
-
-            // We've got a newline, at least!
             if(i > 1)
             {
                 // It can theoretically be a command at only 2 bytes ("P\n")
@@ -175,7 +208,17 @@ void parseCommand(void)
                 {
                     case 'C': // Configuration
                     {
-                        j = parseCommandConfiguration(j);
+                        if(
+                            (stateMachineState == STATE_GROUND_IDLE)
+                            ||
+                            (stateMachineState == STATE_GROUND_IDLE_ON_PAD)
+                        )
+                        {
+                            j = parseCommandConfiguration(j);
+                        }
+                        else
+                        {
+                        }
                         break;
                     }
 
@@ -211,14 +254,7 @@ void parseCommand(void)
             Serial.print("pC: utilized command length: ");
             Serial.println(j);
 
-            // cmdline = "\nS1\nCLAI1030.0000\nHADET"
-            // cmdlength = 23
-            for(j = 0; j < (cmdlength - (1 + i)); j++)
-            {
-                cmdline[j] = cmdline[j + 1];
-            }
-            cmdline[cmdlength] = '\0';
-            cmdlength -= 1 + i;
+            stripCommand(i);
 
             Serial.print("pC: cmdline now has ");
             Serial.print(cmdlength);
