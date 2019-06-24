@@ -16,6 +16,7 @@ The project has been running a few years, with Easter and summer vacations natur
 * Manual application of pressurized air (bicycle pump) allowing tight control of at least *one* launch parameter.
 * Pressure-capable plug (from a simple bottle rocket project).
 * Sturdy, well-proven release mechanism allowing a (rather) controlled launch (PVC pipes and zip-ties).
+* A flight recording camera that loses its data on hard landings (eg. all but tree-top landings; high-G intolerant SD card connection?).
 
 
 
@@ -26,6 +27,7 @@ The project has been running a few years, with Easter and summer vacations natur
 * Barometer for apex detection (parachute deployment, plus *how high did we go?*).
 * Radiotelemetry (433MHz).
 * Locator beacon (audiovisual, optionally GPS).
+* A flight recording camera that doesn't lose its data (*solder* an SD card to that thing).
 
 
 
