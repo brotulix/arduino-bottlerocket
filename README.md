@@ -355,22 +355,22 @@ Potential and kinetic energy:
 
 - <img src="doc/equations/Eq_001.svg " title="Ep = Ek" />
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;mgh = \frac{{mv}^{2}}{2}" title="mgh = (mv^2)/2"/>
+- <img src="doc/equations/Eq_002.svg" title="mgh = (mv^2)/2"/>
 
 Potential energy:
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{p} = mgh = 0.25 \times 9.81 \times 30 [kg \times \frac{m}{{s}^{2}} \times m]" title="Ep = mgh = 0.25 * 9.81 * 30 [kg * m/(s^2) * m]"/>
+- <img src="doc/equations/Eq_003.svg" title="Ep = mgh = 0.25 * 9.81 * 30 [kg * m/(s^2) * m]"/>
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{p} = 73.575 [kg \times \frac{m}{{s}^{2}} \times m]" title="Ep = 73.575 [kg * m/(s^2) * m]"/>
+- <img src="doc/equations/Eq_004.svg" title="Ep = 73.575 [kg * m/(s^2) * m]"/>
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{p} = 73.575 [Nm]" title="Ep = 73.575 [Nm]"/>
+- <img src="doc/equations/Eq_005.svg" title="Ep = 73.575 [Nm]"/>
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{p} = 73.575 [J]" title="Ep = 73.575 [J]"/>
+- <img src="doc/equations/Eq_006.svg" title="Ep = 73.575 [J]"/>
 
 
 Force:
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;F = ma \implies a = \frac{F}{m}" title="F = ma => a = F/m"/>
+- <img src="doc/equations/Eq_007.svg" title="F = ma => a = F/m"/>
 
 <!-- *All wrong*
 - <img src="abcdefga = \frac{183.22}{0.25} [\frac{N}{kg}]" title="a = 183.22 / 0.25 [N/kg]"/>
@@ -381,46 +381,46 @@ Force:
 
 Velocity:
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;v = a \times t" title="v = a*t"/>
+- <img src="doc/equations/Eq_008.svg" title="v = a*t"/>
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;v = ?" title="v = ???"/>
+- <img src="doc/equations/Eq_009.svg" title="v = ???"/>
 
 
 Kinetic energy:
 
-<img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{k} = 0.5 * 0.25 * {v}^{2}" title="Ek = 0.5 * 0.25 * v^2"/>
+- <img src="doc/equations/Eq_010.svg" title="Ek = 0.5 * 0.25 * v^2"/>
 
-<img src="https://latex.codecogs.com/svg.latex?\Large&space;E_{k} = ?" title="Ek = ???"/>
+- <img src="doc/equations/Eq_011.svg" title="Ek = ???"/>
 
 
 
 ## Pressure in vessel ##
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;5{bar}=5.09858 [\frac{kg}{{cm}^{2}}]" title="5 bar = 5.09858 kg/cm^2"/>
+- <img src="doc/equations/Eq_012.svg" title="5 bar = 5.09858 kg/cm^2"/>
  
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;=500k [Pa]" title="= 500k [Pa]"/>
+- <img src="doc/equations/Eq_013.svg" title="= 500k [Pa]"/>
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;=500k[\frac{N}{m^{2}}]" title="= 500kN/m^2"/>
+- <img src="doc/equations/Eq_014.svg" title="= 500kN/m^2"/>
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;=500k\times{0.01}^{2}[\frac{N}{cm^2}]" title="= 500k * 0.01 * 0.01 [N/cm^2]"/>
+- <img src="doc/equations/Eq_015.svg" title="= 500k * 0.01 * 0.01 [N/cm^2]"/>
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;=50[\frac{N}{{cm}^{2}}]" title="= 50 [N/cm^2]"/>
+- <img src="doc/equations/Eq_016.svg" title="= 50 [N/cm^2]"/>
 
 
 ## Bottle opening ##
 
 Diameter: 21.6 mm
 
-Area: <img src="https://latex.codecogs.com/svg.latex?\Large&space;\pi{\frac{2.16cm}{2}}^{2}=3.6644{cm}^{2}" title="pi*((2.16cm)/2)^2) = 3.6644 cm^2" />
+Area: <img src="doc/equations/Eq_017.svg" title="pi*((2.16cm)/2)^2) = 3.6644 cm^2" />
 
 
 ## Initial force ##
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;F = 50 \times 3.6644 [\frac{N}{{cm}^{2}} \times {cm}^{2} = N" title="F = 50 * 3.6644 [N/cm^2 * cm^2 = N]" />
+- <img src="doc/equations/Eq_018.svg" title="F = 50 * 3.6644 [N/cm^2 * cm^2 = N]" />
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;F = 183.22 [N]" title="F = 183.22 [N]" />
+- <img src="doc/equations/Eq_019.svg" title="F = 183.22 [N]" />
 
-- <img src="https://latex.codecogs.com/svg.latex?\Large&space;kgf \approx 18 [kg]" title="(kgf = ~= 18 [kg])" />
+- <img src="doc/equations/Eq_020.svg" title="(kgf = ~= 18 [kg])" />
 
 
 
