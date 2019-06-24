@@ -34,6 +34,7 @@
 #define STATE_GROUND_DATADUMP       7   // ### Ground, data-dump state
 
 #define COMMAND_LINE_BUFFER_SIZE    32
+#define COMMAND_LINE_APPEND_THRESHOLD   ((COMMAND_LINE_BUFFER_SIZE / 4) * 3)
 
 Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
 
@@ -47,6 +48,8 @@ volatile byte stateMachineState = STATE_GROUND_IDLE;
 // Set a default sea level (= 0m ASL) pressure
 float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA;
 
+float launchPadHeight = 0.0;
+
 
 
 uint8_t parseCommandConfiguration(uint8_t j)
@@ -55,20 +58,24 @@ uint8_t parseCommandConfiguration(uint8_t j)
     {
         case 'A': // Averaging
         {
+            Serial.println("Averaging");
             switch(cmdline[j++])
             {
                 case 'A': // Accelerometer
                 {
+                    Serial.println("Accelerometer");
                     break;
                 }
 
                 case 'B': // Barometer
                 {
+                    Serial.println("Barometer");
                     break;
                 }
 
                 case 'M': // Magnetometer
                 {
+                    Serial.println("Magnetometer");
                     break;
                 }
 
@@ -78,26 +85,39 @@ uint8_t parseCommandConfiguration(uint8_t j)
             break;
         }
         
+        case 'G': // Launch pad height
+        {
+            Serial.println("Sea level pressure");
+            break;
+        }
+
         case 'H': // Launch pad height
         {
+            Serial.println("Height");
             break;
         }
 
         case 'L': // Limits
         {
+            Serial.println("Limits");
+
             switch(cmdline[j++])
             {
                 case 'A': // Accelerometer
                 {
+                    Serial.println("Accelerometer");
+
                     switch(cmdline[j++])
                     {
                         case 'I': // Inbound
                         {
+                            Serial.println("Inbound");
                             break;
                         }
                         
                         case 'O': // Outbound
                         {
+                            Serial.println("Outbound");
                             break;
                         }
 
@@ -110,11 +130,13 @@ uint8_t parseCommandConfiguration(uint8_t j)
 
                 case 'B': // Barometer
                 {
+                    Serial.println("Barometer");
                     break;
                 }
 
                 case 'M': // Magnetometer
                 {
+                    Serial.println("Magnetometer");
                     break;
                 }
 
@@ -126,15 +148,18 @@ uint8_t parseCommandConfiguration(uint8_t j)
         
         case 'T': // Timeouts
         {
+            Serial.println("Timeouts");
             switch(cmdline[j++])
             {
                 case 'I': // Inbound
                 {
+                    Serial.println("Inbound");
                     break;
                 }
 
                 case 'O': // Outbound
                 {
+                    Serial.println("Outbound");
                     break;
                 }
 
@@ -159,110 +184,190 @@ uint8_t parseCommandConfiguration(uint8_t j)
 void stripCommand(uint8_t i)
 {
     uint8_t j = 0;
+    
+    if(i == 0)
+    {
+        return;
+    }
 
-    if(i >= COMMAND_LINE_BUFFER_SIZE)
+    if(i > COMMAND_LINE_BUFFER_SIZE)
     {
         // This is an error, but we "solve" it by clearing the whole buffer.
-        i = COMMAND_LINE_BUFFER_SIZE - 1;
+        i = COMMAND_LINE_BUFFER_SIZE;
     }
-
-    // Shift the rest of the command buffer to the left
-    for(j = 0; j < (COMMAND_LINE_BUFFER_SIZE - (1 + i)); j++)
+    else
     {
-        cmdline[j] = cmdline[j + 1];
-    }
-    
-    // Clear the rest of the command buffer
-    for(; j < COMMAND_LINE_BUFFER_SIZE; j++)
-    {
-        cmdline[j] = '\0';
+        // Shift the rest of the command buffer i characters to the left
+        for(j = 0; j < COMMAND_LINE_BUFFER_SIZE; j++)
+        {
+            if(j < COMMAND_LINE_BUFFER_SIZE - (i + 1))
+            {
+                cmdline[j] = cmdline[j + i];
+            }
+            else
+            {
+                cmdline[j] = '\0';
+            }
+            
+        }
     }
     
     // Decrement length counter
-    if(cmdlength < 1 + i)
+    if(i > cmdlength)
     {
         cmdlength = 0;
     }
     else
     {
-        cmdlength -= 1 + i;
+        cmdlength -= i;
     }
+
+#if 0
+    Serial.print("Command string: [");
+    Serial.flush();
+    for(j = 0; j < COMMAND_LINE_BUFFER_SIZE; j++)
+    {
+        Serial.print(cmdline[j] > 20 ? cmdline[j] : '.');
+        Serial.flush();
+    }
+    Serial.println("]");
+    Serial.flush();
+#endif
+
 }
 
 
 
-void parseCommand(void)
+uint8_t parseCommand(void)
 {
     uint8_t i = 0;
     uint8_t j = 0;
     
-    for(i = 0; i < cmdlength; i++)
+    // Find the first newline
+    for(i = 0; i <= cmdlength; i++)
     {
-        // Check for a complete command
-        if(cmdline[i] == '\n')
+        if(cmdline[i] == ';')
         {
-            if(i > 1)
+            //Serial.print("Newline at position ");
+            //Serial.println(i);
+            //Serial.flush();
+            break;
+        }
+    }
+
+    if(i == 0)
+    {
+        return 1;
+    }
+
+    if(i > cmdlength)
+    {
+        //Serial.println("No newline found!");
+        //Serial.flush();
+        if(cmdlength <= COMMAND_LINE_APPEND_THRESHOLD)
+        {
+            // Not to worry, maybe a newline arrives shortly...
+            return 0;
+        }
+
+        // We're above threshold for reading in new bytes,
+        //   and there is no newline in our buffer!
+        if(cmdlength > COMMAND_LINE_APPEND_THRESHOLD)
+        {
+            // Start shifting bytes to the left in search of a command
+            return 1;
+        }
+    }
+
+    if(i > 0)
+    {
+        // It can theoretically be a command at only 2 bytes ("P\n")
+        switch(cmdline[j++])
+        {
+            Serial.print(millis());
+            Serial.print(": ");
+
+            case 'C': // Configuration
             {
-                // It can theoretically be a command at only 2 bytes ("P\n")
-                switch(cmdline[j++])
+                Serial.print("Configuration command ");
+                if(
+                    (stateMachineState == STATE_GROUND_IDLE)
+                    ||
+                    (stateMachineState == STATE_GROUND_IDLE_ON_PAD)
+                )
                 {
-                    case 'C': // Configuration
+                    Serial.println("input");
+                    j = parseCommandConfiguration(j);
+                    if(j < i)
                     {
-                        if(
-                            (stateMachineState == STATE_GROUND_IDLE)
-                            ||
-                            (stateMachineState == STATE_GROUND_IDLE_ON_PAD)
-                        )
-                        {
-                            j = parseCommandConfiguration(j);
-                        }
-                        else
-                        {
-                        }
-                        break;
+                        Serial.println("There were leftover characters!");
                     }
+                    return j;
+                }
+                else
+                {
+                    Serial.println("in wrong mode!");
+                    // Ignore the command
+                    return i;
+                }
+                break;
+            }
 
-                    case 'P': // Ping
-                    {
-                        Serial.println("P");
-                        break;
-                    }
-                    
-                    case 'S': // State transition
-                    {
-                        i = cmdline[j++] - 48;
-                        if(i >= 8)
-                        {
-                            // Error!
-                            Serial.println("E");
-                            break;
-                        }
-                        stateMachineState = i;
-                        break;
-                    }
-                    
-                    default:
-                    {
-                        Serial.println("_");
-                        break;
-                    }
-                } // switch(cmdline[0])
-            } // if(i > 1)
+            case 'D': // Debug
+            {
+                Serial.print("Current state is S");
+                Serial.println(stateMachineState);
+                Serial.print("System time is ");
+                Serial.println(millis());
+                Serial.print("Command buffer length: ");
+                Serial.println(cmdlength);
+                return i;
+                break;
+            }
 
-            Serial.print("pC: LF at: ");
-            Serial.println(i);
-            Serial.print("pC: utilized command length: ");
-            Serial.println(j);
-
-            stripCommand(i);
-
-            Serial.print("pC: cmdline now has ");
-            Serial.print(cmdlength);
-            Serial.println(" byte remaining");
-
+            case 'P': // Ping
+            {
+                Serial.println("P");
+                return i;
+                break;
+            }
             
-        } // if(cmdline[i] == '\n')
-    } // for()
+            case 'S': // State transition
+            {
+                if(j == i)
+                {
+                    // Report current state
+                    Serial.print("S");
+                    Serial.println(stateMachineState);
+                    return i;
+                }
+
+                Serial.print("State change ");
+                j = (uint8_t)cmdline[j++] - 0x30;
+                if(j >= 8)
+                {
+                    // Error!
+                    Serial.println("error!");
+                    return i;
+                    break;
+                }
+                Serial.print("from S");
+                Serial.print(stateMachineState);
+                Serial.print(" to S");
+                Serial.println(j);
+                stateMachineState = j;
+                return i;
+                break;
+            }
+            
+            default:
+            {
+                Serial.println("E: Command not recognized.");
+                return i;
+                break;
+            }
+        } // switch(cmdline[0])
+    } // if(i > 1)
 } // parseCommand()
 
 
@@ -290,96 +395,97 @@ void stateMachine()
     {
         case STATE_GROUND_IDLE_ON_PAD:
         {
-            Serial.print("S");
-            Serial.println(STATE_GROUND_IDLE_ON_PAD);
             break;
         }
         
         case STATE_GROUND_ARMED:
         {
-            Serial.print("S");
-            Serial.println(STATE_GROUND_ARMED);
             break;
         }
         
         case STATE_AIRBORNE_OUTBOUND:
         {
-            Serial.print("S");
-            Serial.println(STATE_AIRBORNE_OUTBOUND);
             break;
         }
         
         case STATE_AIRBORNE_DEPLOYMENT:
         {
-            Serial.print("S");
-            Serial.println(STATE_AIRBORNE_DEPLOYMENT);
-
             stateMachineState = STATE_AIRBORNE_INBOUND;
-
             break;
         }
         
         case STATE_AIRBORNE_INBOUND:
         {
-            Serial.print("S");
-            Serial.println(STATE_AIRBORNE_INBOUND);
             break;
         }
         
         case STATE_GROUND_RECOVERY:
         {
-            Serial.print("S");
-            Serial.println(STATE_GROUND_RECOVERY);
             break;
         }
         
         case STATE_GROUND_DATADUMP:
         {
-            Serial.print("S");
-            Serial.println(STATE_GROUND_DATADUMP);
             break;
         }
 
         default:
         case STATE_GROUND_IDLE:
         {
-            Serial.print("S");
-            Serial.println(STATE_GROUND_IDLE);
             break;
         }
     }
 }
 
 
-
+/** Check for bytes in UART receive buffer, and append them to our own command
+ *    buffer, or at least as many as there is room for at the moment.
+ */
 void grabSerial()
 {
     uint8_t cmdlen = 0;
     uint8_t i = 0;
     
-    // Check for commands
+    // Only get more data for command buffer if it's below threshold.
+    if(cmdlength > COMMAND_LINE_APPEND_THRESHOLD)
+    {
+        return;
+    }
+
+    // Check for bytes in UART receive buffer
     cmdlen = Serial.available();
     if(cmdlen > 0)
     {
-        Serial.print(cmdlen);
-        Serial.println(" bytes command line");
-        
-        if(cmdlength + cmdlen >= COMMAND_LINE_BUFFER_SIZE)
+        // Don't try to overfill the command buffer
+        if((cmdlength + cmdlen) > COMMAND_LINE_BUFFER_SIZE)
         {
-            Serial.println("UART buffer read would overshoot command buffer length.");
+            // Only fill it...
             cmdlen = COMMAND_LINE_BUFFER_SIZE - cmdlength;
         }
 
-        i = Serial.readBytes((char*)(&cmdline + cmdlength), cmdlen);
+        i = Serial.readBytes((char*)(&cmdline[cmdlength]), cmdlen);
         
-        if(i < cmdlen)
-        {
-            Serial.println("Only read ");
-            Serial.print(i);
-            Serial.println(" bytes!");
-        }
-
+        //Serial.print("Read ");
+        //Serial.print(i);
+        //Serial.print(" of ");
+        //Serial.print(cmdlen);
+        //Serial.println(" bytes");
+        
         cmdlength += i;
+
+        // Don't try to terminate past end of buffer
+        if(cmdlength == COMMAND_LINE_BUFFER_SIZE)
+        {
+            Serial.println("Command buffer at capacity!");
+            return;
+        }
+        if(cmdlength > COMMAND_LINE_BUFFER_SIZE)
+        {
+            Serial.println("Command buffer capacity exceeded!");
+            return;
+        }
+        
+        cmdline[cmdlength] = '\0';
 
     }
 
@@ -394,6 +500,21 @@ void setup()
     Serial.print("UART RX Buffer size: ");
     Serial.println(SERIAL_RX_BUFFER_SIZE);
 
+    Serial.print("Command line buffer size: ");
+    Serial.println(COMMAND_LINE_BUFFER_SIZE);
+
+    Serial.print("Command line fill threshold: ");
+    Serial.println(COMMAND_LINE_APPEND_THRESHOLD);
+
+    Serial.println("Clearing command buffer...");
+    for(cmdlength = COMMAND_LINE_BUFFER_SIZE; cmdlength > 0; cmdlength--)
+    {
+        cmdline[cmdlength-1] = '\0';
+    }
+    
+    Serial.print("Command line length: ");
+    Serial.println(cmdlength);
+
     Serial.println("Setting up pins...");
 
     pinMode(INTSRC_INTERRUPT, INPUT);
@@ -403,6 +524,8 @@ void setup()
     pinMode(INTSRC_ACCELEROMETER, INPUT);
     pinMode(INTSRC_MAGNETOMETER, INPUT);
 
+    Serial.println("Initializing sensors...");
+    
     if (!bmp.begin()) {
         Serial.println("ERROR: BMP085 not detected!");
         CLEAR_BIT(sensorStatus, STATUS_BAROMETER_DETECTED);
@@ -416,7 +539,8 @@ void setup()
     Serial.print("Setup status byte: ");
     Serial.println(sensorStatus);
 
-    Serial.println("setup() ends");
+    Serial.print("setup() ends at ");
+    Serial.println(millis());
 }
 
 
@@ -424,16 +548,20 @@ void setup()
 void loop()
 {
     sensors_event_t event;
+    uint8_t i = 0;
 
-    Serial.print("State: ");
-    Serial.println(stateMachineState);
-    
     grabSerial();
 
-    parseCommand();
+    i = parseCommand();
+
+    if(i > 0)
+    {
+        stripCommand(i);
+    }
 
     stateMachine();
 
+#if 0
     bmp.getEvent(&event);
 
     if(event.pressure)
@@ -462,6 +590,7 @@ void loop()
     {
         Serial.println("Sensor event error");
     }
+#endif // if 0
     
-    delay(1000);
+    delay(10);
 }
