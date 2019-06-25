@@ -3,11 +3,15 @@
 #define ARDUINO 185
 #endif
 
-#include <Adafruit_Sensor.h>
-#include <Adafruit_BMP085_U.h>
+#include <Adafruit_Sensor.h>        // Adafruit Unified Sensor library
+#include <Adafruit_BMP085_U.h>      // BMP085 Barometer
+#include <Adafruit_ADXL345_U.h>     // ADXL345 Accelerometer
+#include <Adafruit_HMC5883_U.h>     // HMC5883 Magnetometer
+                                    // Gyro?
 
-#define SET_BIT(a, b)   a |= (0x1 << b);
-#define CLEAR_BIT(a, b) a &= ~(0x1 << b);
+#define SET_BIT(a, b)   a |= (0x1 << b)
+#define CLEAR_BIT(a, b) a &= ~(0x1 << b)
+#define GET_BIT(a, b)   a & (0x1 << b)
 
 
 #define INTSRC_INTERRUPT        2
@@ -33,30 +37,35 @@
 #define STATE_GROUND_RECOVERY       6   // ### Ground, recovery state
 #define STATE_GROUND_DATADUMP       7   // ### Ground, data-dump state
 
-#define COMMAND_LINE_BUFFER_SIZE            32
-#define COMMAND_LINE_APPEND_THRESHOLD       ((COMMAND_LINE_BUFFER_SIZE / 4) * 3)
+#define COMMAND_LINE_BUFFER_SIZE                32
+#define COMMAND_LINE_APPEND_THRESHOLD           ((COMMAND_LINE_BUFFER_SIZE / 4) * 3)
 
-#define SENSORS_BAROMETER_NUM_VALUES        16
-#define SENSORS_BAROMETER_SEALEVELHPA       SENSORS_PRESSURE_SEALEVELHPA
+#define SENSORS_BAROMETER_NUM_VALUES            16
+#define SENSORS_BAROMETER_SEALEVELHPA           SENSORS_PRESSURE_SEALEVELHPA
+#define SENSORS_BAROMETER_FACTOR_SCALING        10
 
-#define SENSORS_ACCELEROMETER_NUM_VALUES    16
+#define SENSORS_ACCELEROMETER_NUM_VALUES        16
+#define SENSORS_ACCELEROMETER_FACTOR_SCALING    10
 
-#define SENSORS_MAGNETOMETER_NUM_VALUES     16
+#define SENSORS_MAGNETOMETER_NUM_VALUES         16
+#define SENSORS_MAGNETOMETER_FACTOR_SCALING     10
 
 
 
-Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
+Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(24680);
+Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
+Adafruit_ADXL345_Unified acc = Adafruit_ADXL345_Unified(13579);
 
 byte sensorStatus = 0x0;
 
 char cmdline[COMMAND_LINE_BUFFER_SIZE] = { 0 };
 uint8_t cmdlength = 0;
 
-uint16_t sensorBarometerValues[SENSORS_BAROMETER_NUM_VALUES] = { 0 };
+uint32_t sensorBarometerValues[SENSORS_BAROMETER_NUM_VALUES] = { 0 };
 uint16_t sensorAccelerometerValues[SENSORS_ACCELEROMETER_NUM_VALUES] = { 0 };
 uint16_t sensorMagnetometerValues[SENSORS_MAGNETOMETER_NUM_VALUES] = { 0 };
 
-uint16_t sensorBarometerAverage = 0;
+uint32_t sensorBarometerAverage = 0;
 uint16_t sensorAccelerometerAverage = 0;
 uint16_t sensorMagnetometerAverage = 0;
 
@@ -79,7 +88,7 @@ float launchPadHeight = 0.0;
 void sensorBarometerCalculateAverage()
 {
     uint8_t i = 0;
-    unsigned long sum = 0;
+    uint32_t sum = 0;
     float result = 0.0;
     unsigned long after = 0;
     unsigned long before = millis();
@@ -89,7 +98,7 @@ void sensorBarometerCalculateAverage()
         sum += sensorBarometerValues[i];
     }
     result = sum / (i * 1.0);
-    sensorBarometerAverage = (uint16_t)result;
+    sensorBarometerAverage = (uint32_t)result;
     after = millis();
     Serial.print("Calculating barometer average took ");
     Serial.print(after-before);
@@ -109,7 +118,7 @@ void sensorBarometerCalculateAverage()
 
 void sensorBarometerAppendValue()
 {
-    sensorBarometerValues[sensorBarometerNextReading] = sensorBarometerReadPressure();
+    sensorBarometerValues[sensorBarometerNextReading] = sensorBarometerReadValue();
     sensorBarometerNextReading = (sensorBarometerNextReading + 1) & 0xF;
     if(sensorBarometerReadings < SENSORS_BAROMETER_NUM_VALUES)
     {
@@ -117,7 +126,89 @@ void sensorBarometerAppendValue()
     }
 }
 
-uint16_t sensorBarometerReadPressure()
+void sensorAccelerometerCalculateAverage()
+{
+    uint8_t i = 0;
+    uint32_t sum = 0;
+    float result = 0.0;
+    unsigned long after = 0;
+    unsigned long before = millis();
+
+    for(i = 0; i < sensorAccelerometerReadings; i++)
+    {
+        sum += sensorAccelerometerValues[i];
+    }
+    result = sum / (i * 1.0);
+    sensorAccelerometerAverage = (uint16_t)result;
+    after = millis();
+    Serial.print("Calculating accelerometer average took ");
+    Serial.print(after-before);
+    Serial.print("ms for ");
+    Serial.print(i);
+    Serial.println(" values:");
+
+    for(i = 0; i < sensorAccelerometerReadings; i++)
+    {
+        Serial.print(i);
+        Serial.print(": ");
+        Serial.print(sensorAccelerometerValues[i]);
+        Serial.println(" m/s^2");
+    }
+
+}
+
+void sensorAccelerometerAppendValue()
+{
+    sensorAccelerometerValues[sensorAccelerometerNextReading] = sensorAccelerometerReadValue();
+    sensorAccelerometerNextReading = (sensorAccelerometerNextReading + 1) & 0xF;
+    if(sensorAccelerometerReadings < SENSORS_BAROMETER_NUM_VALUES)
+    {
+        sensorAccelerometerReadings++;
+    }
+}
+
+void sensorMagnetometerCalculateAverage()
+{
+    uint8_t i = 0;
+    uint32_t sum = 0;
+    float result = 0.0;
+    unsigned long after = 0;
+    unsigned long before = millis();
+
+    for(i = 0; i < sensorMagnetometerReadings; i++)
+    {
+        sum += sensorMagnetometerValues[i];
+    }
+    result = sum / (i * 1.0);
+    sensorMagnetometerAverage = (uint32_t)result;
+    after = millis();
+    Serial.print("Calculating magnetometer average took ");
+    Serial.print(after-before);
+    Serial.print("ms for ");
+    Serial.print(i);
+    Serial.println(" values:");
+
+    for(i = 0; i < sensorMagnetometerReadings; i++)
+    {
+        Serial.print(i);
+        Serial.print(": ");
+        Serial.print(sensorMagnetometerValues[i]);
+        Serial.println(" uT");
+    }
+
+}
+
+void sensorMagnetometerAppendValue()
+{
+    sensorMagnetometerValues[sensorMagnetometerNextReading] = sensorMagnetometerReadValue();
+    sensorMagnetometerNextReading = (sensorMagnetometerNextReading + 1) & 0xF;
+    if(sensorMagnetometerReadings < SENSORS_BAROMETER_NUM_VALUES)
+    {
+        sensorMagnetometerReadings++;
+    }
+}
+
+uint32_t sensorBarometerReadValue()
 {
     sensors_event_t event;
 
@@ -125,13 +216,51 @@ uint16_t sensorBarometerReadPressure()
 
     if(event.pressure)
     {
-        return((uint16_t)(event.pressure * 100));
+        Serial.print("Pressure as float: ");
+        Serial.println(event.pressure);
+        Serial.print("Pressure as uint32_t: ");
+        Serial.println((uint32_t)event.pressure);
+        Serial.print("Pressure as uint32_t in Pascal: ");
+        Serial.println((uint32_t)(event.pressure * 100.0));
+        return (uint32_t)(event.pressure * 100);
     }
     else
     {
         Serial.println("Sensor event error");
         return 0;
     }
+}
+
+uint16_t sensorAccelerometerReadValue() {
+    sensors_event_t event;
+
+    acc.getEvent(&event);
+
+    if(event.acceleration.x)
+    {
+        Serial.print("X: "); Serial.print(event.acceleration.x); Serial.print("  ");
+        Serial.print("Y: "); Serial.print(event.acceleration.y); Serial.print("  ");
+        Serial.print("Z: "); Serial.print(event.acceleration.z); Serial.print("  ");Serial.println("m/s^2 ");
+        return (uint16_t)(
+            sqrt(
+                (event.acceleration.x*event.acceleration.x)
+                +
+                (event.acceleration.y*event.acceleration.y)
+                +
+                (event.acceleration.z*event.acceleration.z)
+            )
+            * SENSORS_ACCELEROMETER_FACTOR_SCALING
+        );
+    }
+    else
+    {
+        Serial.println("Sensor event error");
+        return 0;
+    }
+}
+
+uint16_t sensorMagnetometerReadValue() {
+    return 0;
 }
 
 void sensorBarometerGetHeightASL()
@@ -349,7 +478,7 @@ void stripCommand(uint8_t i)
         cmdlength -= i;
     }
 
-#if 0
+    /*
     Serial.print("Command string: [");
     Serial.flush();
     for(j = 0; j < COMMAND_LINE_BUFFER_SIZE; j++)
@@ -359,8 +488,7 @@ void stripCommand(uint8_t i)
     }
     Serial.println("]");
     Serial.flush();
-#endif
-
+    */
 }
 
 
@@ -454,10 +582,26 @@ uint8_t parseCommand(void)
                 Serial.print("Average: ");
                 Serial.print(sensorBarometerAverage);
                 Serial.println(" Pa");
-                //sensorBarometerReadPressure();
+                //sensorBarometerReadValue();
                 sensorBarometerReadTemperature();
                 //sensorBarometerGetHeightASL();
-                
+
+
+                sensorAccelerometerAppendValue();
+                sensorAccelerometerCalculateAverage();
+                Serial.print("Average: ");
+                Serial.print(sensorAccelerometerAverage);
+                Serial.println(" m/s^2");
+
+
+                /*
+                sensorMagnetometerAppendValue();
+                sensorMagnetometerCalculateAverage();
+                Serial.print("Average: ");
+                Serial.print(sensorMagnetometerAverage);
+                Serial.println(" uT");
+                */
+
                 return i;
                 break;
             }
@@ -512,16 +656,57 @@ uint8_t parseCommand(void)
 void displaySensorDetails(void)
 {
     sensor_t sensor;
-    bmp.getSensor(&sensor);
-    Serial.println("------------------------------------");
-    Serial.print  ("Sensor:       "); Serial.println(sensor.name);
-    Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
-    Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
-    Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" hPa");
-    Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" hPa");
-    Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" hPa");  
-    Serial.println("------------------------------------");
-    Serial.println("");
+
+    if(!sensorStatus)
+    {
+        Serial.println("No sensors detected!");
+        return;
+    }
+    
+    if(GET_BIT(sensorStatus, STATUS_BAROMETER_DETECTED))
+    {
+        bmp.getSensor(&sensor);
+        Serial.println("------------------------------------");
+        Serial.print  ("Sensor:       "); Serial.println(sensor.name);
+        Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
+        Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
+        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" hPa");
+        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" hPa");
+        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" hPa");  
+        Serial.println("------------------------------------");
+        Serial.println("");
+        Serial.flush();
+    }
+    
+    if(GET_BIT(sensorStatus, STATUS_MAGNETOMETER_DETECTED))
+    {
+        mag.getSensor(&sensor);
+        Serial.println("------------------------------------");
+        Serial.print  ("Sensor:       "); Serial.println(sensor.name);
+        Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
+        Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
+        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" uT");
+        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" uT");
+        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" uT");  
+        Serial.println("------------------------------------");
+        Serial.println("");
+        Serial.flush();
+    }
+
+    if(GET_BIT(sensorStatus, STATUS_ACCELEROMETER_DETECTED))
+    {
+        acc.getSensor(&sensor);
+        Serial.println("------------------------------------");
+        Serial.print  ("Sensor:       "); Serial.println(sensor.name);
+        Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
+        Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
+        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" m/s^2");
+        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" m/s^2");
+        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" m/s^2");  
+        Serial.println("------------------------------------");
+        Serial.println("");
+        Serial.flush();
+    }
 }
 
 
@@ -663,19 +848,32 @@ void setup()
 
     Serial.println("Initializing sensors...");
     
+    Serial.println("Barometer...");
+    SET_BIT(sensorStatus, STATUS_BAROMETER_DETECTED);
     if (!bmp.begin()) {
         Serial.println("ERROR: BMP085 not detected!");
         CLEAR_BIT(sensorStatus, STATUS_BAROMETER_DETECTED);
     }
-    else
+
+    Serial.println("Magnetometer...");
+    SET_BIT(sensorStatus, STATUS_MAGNETOMETER_DETECTED);
+    if(!mag.begin())
     {
-        displaySensorDetails();
-        SET_BIT(sensorStatus, STATUS_BAROMETER_DETECTED);
+        Serial.println("ERROR: HMC5883 not detected!");
+        CLEAR_BIT(sensorStatus, STATUS_MAGNETOMETER_DETECTED);
     }
 
-    Serial.print("Setup status byte: ");
-    Serial.println(sensorStatus);
+    Serial.println("Accelerometer...");
+    SET_BIT(sensorStatus, STATUS_ACCELEROMETER_DETECTED);
+    if(!acc.begin())
+    {
+        Serial.println("ERROR: ADXL345 not detected!");
+        CLEAR_BIT(sensorStatus, STATUS_ACCELEROMETER_DETECTED);
+    }
 
+    // At least one sensor was initialized...
+    displaySensorDetails();
+    
     Serial.print("setup() ends at ");
     Serial.println(millis());
 }
