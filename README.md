@@ -355,8 +355,6 @@ Suggested reporting rates:
 ### Control messages
 A few important control messages are given:
 
-* State machine transition: `Sn`, where `n` is the state level to apply (see above).
-
 * Configuration: `CX`, where `X` is one of the following:
   - `G`: Ground pressure: `Gnnnn.nn`.
   
@@ -375,17 +373,21 @@ A few important control messages are given:
     - `B`: barometer delta (launch and landing)
     - `M`: magnetometer delta (arm and recovery)
 
-* Ping: `P`
+* Debug: `D`. The function of this command will vary during development.
 
-Every command ends with newline (`\n`).
+* Ping: `P`.
 
-The maximum command line length is thus `CLAI9999.9999\n` (14 characters). A command buffer of 32 characters is reserved. An interrupt function should perhaps handle incoming data on serial line to make sure successive commands are not dropped/corrupted, and incoming commands are serviced as soon as a newline is encountered.
+* State machine transition: `Sn`, where `n` is the state level to apply (see above).
+
+Every command ends with semicolon (`;`). Tried using newline (`\n`), but that proved to be difficult to match.
+
+The maximum command line length is thus `CLAI9999.9999;` (14 characters). A command buffer of 32 characters is reserved for now. An interrupt function should perhaps handle incoming data on serial line to make sure successive commands are not dropped/corrupted, and incoming commands are serviced as soon as a newline is encountered.
 
 State machine transition commands will be accepted at **any** time.
 
 Configuration will only occur during `IDLE` states (`STATE_GROUND_IDLE` and `STATE_GROUND_IDLE_ON_PAD`).
 
-Ping command will prompt a Pong reply. Mainly intended for RSSI measurements during recovery phase.
+Ping command will prompt a Pong reply (a returned `P`). Mainly intended for RSSI measurements during recovery phase.
 
 
 
