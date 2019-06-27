@@ -50,6 +50,22 @@
 #define SENSORS_MAGNETOMETER_NUM_VALUES         16
 #define SENSORS_MAGNETOMETER_FACTOR_SCALING     10
 
+typedef struct {
+    uint32_t values[16];
+    uint32_t prev_average;
+    uint32_t average;
+    uint8_t filled_elements;
+    uint8_t next_element_to_fill;
+    uint16_t spare;
+} savg16_32;
+
+typedef struct {
+    uint16_t values[16];
+    uint16_t prev_average;
+    uint16_t average;
+    uint8_t filled_elements;
+    uint8_t next_element_to_fill;
+} savg16_16;
 
 
 Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(24680);
@@ -61,22 +77,14 @@ byte sensorStatus = 0x0;
 char cmdline[COMMAND_LINE_BUFFER_SIZE] = { 0 };
 uint8_t cmdlength = 0;
 
+
+savg16_32 valsBarometer         = {0};
+savg16_16 valsAccelerometer     = {0};
+savg16_16 valsMagnetometer      = {0};
+
 uint32_t sensorBarometerValues[SENSORS_BAROMETER_NUM_VALUES] = { 0 };
 uint16_t sensorAccelerometerValues[SENSORS_ACCELEROMETER_NUM_VALUES] = { 0 };
 uint16_t sensorMagnetometerValues[SENSORS_MAGNETOMETER_NUM_VALUES] = { 0 };
-
-uint32_t sensorBarometerAverage = 0;
-uint16_t sensorAccelerometerAverage = 0;
-uint16_t sensorMagnetometerAverage = 0;
-
-uint8_t sensorBarometerReadings = 0;
-uint8_t sensorBarometerNextReading = 0;
-
-uint8_t sensorAccelerometerReadings = 0;
-uint8_t sensorAccelerometerNextReading = 0;
-
-uint8_t sensorMagnetometerReadings = 0;
-uint8_t sensorMagnetometerNextReading = 0;
 
 byte stateMachineState = STATE_GROUND_IDLE;
 
@@ -85,128 +93,156 @@ float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA;
 
 float launchPadHeight = 0.0;
 
-void sensorBarometerCalculateAverage()
+uint32_t fsqrt(uint32_t arg)
+{
+    uint64_t sq = 0;
+    //uint32_t fg = (arg >> 1); // start with half the value
+    uint8_t i = 0;
+    uint32_t res = 0;
+    uint32_t temp = 0;
+    if(arg == 0)
+    {
+        return 0;
+    }
+
+    if(arg == 1)
+    {
+        return 1;
+    }
+
+    // Find the largest bit in fg
+    for(i = 31; !((arg >> 1) & (0x1 << i)) && (i > 0); i--)
+    {
+        // Do nothing
+    }
+
+    res = 0;
+    i++;
+
+    for(; i > 0; i--)
+    {
+        temp = res | (1 << i-1);
+        
+        sq = temp*temp;
+        
+        if(sq > arg)
+        {
+            continue;
+        }
+
+        res = temp;
+
+        if(sq == arg)
+        {
+            // Perfect match
+            break;
+        }
+    }
+
+    return res;
+
+}
+
+uint8_t append16(savg16_16 *vals, uint16_t value)
+{
+    // 0 is an error value
+    if(value == 0)
+    {
+        return vals->filled_elements;
+    }
+
+    vals->values[vals->next_element_to_fill] = value;
+    vals->next_element_to_fill = (vals->next_element_to_fill + 1) & 0xF;
+    if(vals->filled_elements < 16)
+    {
+        vals->filled_elements++;
+    }
+
+    return vals->filled_elements;
+}
+
+uint8_t append32(savg16_32 *vals, uint32_t value)
+{
+    // 0 is an error value
+    if(value == 0)
+    {
+        return vals->filled_elements;
+    }
+
+    vals->values[vals->next_element_to_fill] = value;
+    vals->next_element_to_fill = (vals->next_element_to_fill + 1) & 0xF;
+    if(vals->filled_elements < 16)
+    {
+        vals->filled_elements++;
+    }
+
+    return vals->filled_elements;
+}
+
+uint16_t favg16(savg16_16 *vals)
 {
     uint8_t i = 0;
+    uint8_t j = 0;
     uint32_t sum = 0;
-    float result = 0.0;
-    unsigned long after = 0;
-    unsigned long before = millis();
+    uint32_t avg = 0;
 
-    for(i = 0; i < sensorBarometerReadings; i++)
-    {
-        sum += sensorBarometerValues[i];
-    }
-    result = sum / (i * 1.0);
-    sensorBarometerAverage = (uint32_t)result;
-    after = millis();
-    Serial.print("Calculating barometer average took ");
-    Serial.print(after-before);
-    Serial.print("ms for ");
-    Serial.print(i);
-    Serial.println(" values:");
+    // Point to the first element:
+    j = (vals->next_element_to_fill + 16 - vals->filled_elements) & 0xF;
 
-    for(i = 0; i < sensorBarometerReadings; i++)
+    for(i = 0; i < vals->filled_elements; i++)
     {
-        Serial.print(i);
-        Serial.print(": ");
-        Serial.print(sensorBarometerValues[i]);
-        Serial.println(" Pa");
+        sum += vals->values[j];        
+        j = (j + 1) & 0xF;
     }
 
+    if(vals->filled_elements == 16)
+    {
+        avg = sum >> 4;
+    }
+    else
+    {
+        avg = sum / vals->filled_elements;
+    }
+
+    vals->prev_average = vals->average;
+    vals->average = avg;
+
+    return avg;
 }
 
-void sensorBarometerAppendValue()
-{
-    sensorBarometerValues[sensorBarometerNextReading] = sensorBarometerReadValue();
-    sensorBarometerNextReading = (sensorBarometerNextReading + 1) & 0xF;
-    if(sensorBarometerReadings < SENSORS_BAROMETER_NUM_VALUES)
-    {
-        sensorBarometerReadings++;
-    }
-}
-
-void sensorAccelerometerCalculateAverage()
+uint32_t favg32(savg16_32 *vals)
 {
     uint8_t i = 0;
-    uint32_t sum = 0;
-    float result = 0.0;
-    unsigned long after = 0;
-    unsigned long before = millis();
+    uint8_t j = 0;
+    uint64_t sum = 0;
+    uint32_t avg = 0;
 
-    for(i = 0; i < sensorAccelerometerReadings; i++)
-    {
-        sum += sensorAccelerometerValues[i];
-    }
-    result = sum / (i * 1.0);
-    sensorAccelerometerAverage = (uint16_t)result;
-    after = millis();
-    Serial.print("Calculating accelerometer average took ");
-    Serial.print(after-before);
-    Serial.print("ms for ");
-    Serial.print(i);
-    Serial.println(" values:");
+    // Point to the first element:
+    j = (vals->next_element_to_fill + 16 - vals->filled_elements) & 0xF;
 
-    for(i = 0; i < sensorAccelerometerReadings; i++)
+    for(i = 0; i < vals->filled_elements; i++)
     {
-        Serial.print(i);
-        Serial.print(": ");
-        Serial.print(sensorAccelerometerValues[i]);
-        Serial.println(" m/s^2");
+        sum += vals->values[j];        
+        j = (j + 1) & 0xF;
     }
+
+    if(vals->filled_elements == 16)
+    {
+        avg = sum >> 4;
+    }
+    else
+    {
+        avg = sum / vals->filled_elements;
+    }
+
+    vals->prev_average = vals->average;
+    vals->average = avg;
+
+    return avg;
 
 }
 
-void sensorAccelerometerAppendValue()
-{
-    sensorAccelerometerValues[sensorAccelerometerNextReading] = sensorAccelerometerReadValue();
-    sensorAccelerometerNextReading = (sensorAccelerometerNextReading + 1) & 0xF;
-    if(sensorAccelerometerReadings < SENSORS_BAROMETER_NUM_VALUES)
-    {
-        sensorAccelerometerReadings++;
-    }
-}
 
-void sensorMagnetometerCalculateAverage()
-{
-    uint8_t i = 0;
-    uint32_t sum = 0;
-    float result = 0.0;
-    unsigned long after = 0;
-    unsigned long before = millis();
-
-    for(i = 0; i < sensorMagnetometerReadings; i++)
-    {
-        sum += sensorMagnetometerValues[i];
-    }
-    result = sum / (i * 1.0);
-    sensorMagnetometerAverage = (uint32_t)result;
-    after = millis();
-    Serial.print("Calculating magnetometer average took ");
-    Serial.print(after-before);
-    Serial.print("ms for ");
-    Serial.print(i);
-    Serial.println(" values:");
-
-    for(i = 0; i < sensorMagnetometerReadings; i++)
-    {
-        Serial.print(i);
-        Serial.print(": ");
-        Serial.print(sensorMagnetometerValues[i]);
-        Serial.println(" uT");
-    }
-
-}
-
-void sensorMagnetometerAppendValue()
-{
-    sensorMagnetometerValues[sensorMagnetometerNextReading] = sensorMagnetometerReadValue();
-    sensorMagnetometerNextReading = (sensorMagnetometerNextReading + 1) & 0xF;
-    if(sensorMagnetometerReadings < SENSORS_BAROMETER_NUM_VALUES)
-    {
-        sensorMagnetometerReadings++;
-    }
-}
 
 uint32_t sensorBarometerReadValue()
 {
@@ -236,25 +272,13 @@ uint16_t sensorAccelerometerReadValue() {
 
     acc.getEvent(&event);
 
-    if(event.acceleration.x)
+    if(event.acceleration.x || event.acceleration.y || event.acceleration.z)
     {
-        Serial.print("X: "); Serial.print(event.acceleration.x); Serial.print("  ");
-        Serial.print("Y: "); Serial.print(event.acceleration.y); Serial.print("  ");
-        Serial.print("Z: "); Serial.print(event.acceleration.z); Serial.print("  ");Serial.println("m/s^2 ");
-        return (uint16_t)(
-            sqrt(
-                (event.acceleration.x*event.acceleration.x)
-                +
-                (event.acceleration.y*event.acceleration.y)
-                +
-                (event.acceleration.z*event.acceleration.z)
-            )
-            * SENSORS_ACCELEROMETER_FACTOR_SCALING
-        );
+        return (uint16_t)fsqrt(((event.acceleration.x * event.acceleration.x)*10) + ((event.acceleration.y * event.acceleration.y)*10) + ((event.acceleration.z * event.acceleration.z)*10));
     }
     else
     {
-        Serial.println("Sensor event error");
+        Serial.println("Accel event error");
         return 0;
     }
 }
@@ -577,20 +601,17 @@ uint8_t parseCommand(void)
                 Serial.print("Command buffer length: ");
                 Serial.println(cmdlength);
 
-                sensorBarometerAppendValue();
-                sensorBarometerCalculateAverage();
+                append32(&valsBarometer, sensorBarometerReadValue());
+                
                 Serial.print("Average: ");
-                Serial.print(sensorBarometerAverage);
+                Serial.print(favg32(&valsBarometer));
                 Serial.println(" Pa");
-                //sensorBarometerReadValue();
+                
                 sensorBarometerReadTemperature();
-                //sensorBarometerGetHeightASL();
 
-
-                sensorAccelerometerAppendValue();
-                sensorAccelerometerCalculateAverage();
+                append16(&valsAccelerometer, sensorAccelerometerReadValue());
                 Serial.print("Average: ");
-                Serial.print(sensorAccelerometerAverage);
+                Serial.print(favg16(&valsAccelerometer));
                 Serial.println(" m/s^2");
 
 
