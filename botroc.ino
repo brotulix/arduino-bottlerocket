@@ -9,9 +9,9 @@
 #include <Adafruit_HMC5883_U.h>     // HMC5883 Magnetometer
                                     // Gyro?
 
-#define SET_BIT(a, b)   a |= (0x1 << b)
-#define CLEAR_BIT(a, b) a &= ~(0x1 << b)
-#define GET_BIT(a, b)   a & (0x1 << b)
+#define SET_BIT(a, b)   (a |= (0x1 << b))
+#define CLEAR_BIT(a, b) (a &= ~(0x1 << b))
+#define GET_BIT(a, b)   (a & (0x1 << b))
 
 
 #define INTSRC_INTERRUPT                        2
@@ -107,15 +107,15 @@ uint8_t cmdlength = 0;
 
 sconfig configuration = {
     0,   // millis_previous_loop
-    10,  // interval_refresh_accelerometer
-    10,  // interval_refresh_magnetometer
-    10,  // interval_refresh_barometer
-    250,  // interval_refresh_average_accelerometer
-    250,  // interval_refresh_average_magnetometer
-    250,  // interval_refresh_average_barometer
-    500,  // interval_report_accelerometer
-    500,  // interval_report_magnetometer
-    500,  // interval_report_barometer
+    2500,  // interval_refresh_accelerometer
+    2500,  // interval_refresh_magnetometer
+    2500,  // interval_refresh_barometer
+    10000,  // interval_refresh_average_accelerometer
+    10000,  // interval_refresh_average_magnetometer
+    10000,  // interval_refresh_average_barometer
+    30000,  // interval_report_accelerometer
+    30000,  // interval_report_magnetometer
+    30000,  // interval_report_barometer
     200,  // limit_delta_barometer
     100,  // limit_delta_accelerometer
     0,  // time_to_next_update_accelerometer
@@ -173,7 +173,7 @@ uint32_t fsqrt(uint32_t arg)
 
     for(; i > 0; i--)
     {
-        temp = res | (1 << i-1);
+        temp = res | (1 << (i-1));
         
         sq = temp*temp;
         
@@ -238,6 +238,12 @@ uint16_t favg16(savg16_16 *vals)
     uint32_t sum = 0;
     uint32_t avg = 0;
 
+    // Catch the first call.
+    if(vals->filled_elements == 0)
+    {
+        return 0;
+    }
+
     // Point to the first element:
     j = (vals->next_element_to_fill + 16 - vals->filled_elements) & 0xF;
 
@@ -268,6 +274,12 @@ uint32_t favg32(savg16_32 *vals)
     uint8_t j = 0;
     uint64_t sum = 0;
     uint32_t avg = 0;
+
+    // Catch the first call.
+    if(vals->filled_elements == 0)
+    {
+        return 0;
+    }
 
     // Point to the first element:
     j = (vals->next_element_to_fill + 16 - vals->filled_elements) & 0xF;
@@ -334,9 +346,11 @@ uint16_t sensorMagnetometerReadValue() {
     if(event.magnetic.x || event.magnetic.y || event.magnetic.z)
     {
         /* Display the results (magnetic vector values are in micro-Tesla (uT)) */
+        /*
         Serial.print("X: "); Serial.print(event.magnetic.x); Serial.print("  ");
         Serial.print("Y: "); Serial.print(event.magnetic.y); Serial.print("  ");
         Serial.print("Z: "); Serial.print(event.magnetic.z); Serial.print("  ");Serial.println("uT");
+        */
 
         return (uint16_t)fsqrt(((event.magnetic.x * event.magnetic.x)*10) + ((event.magnetic.y * event.magnetic.y)*10) + ((event.magnetic.z * event.magnetic.z)*10));
 
@@ -713,9 +727,11 @@ uint8_t parseCommand(void)
             }
         } // switch(cmdline[0])
     } // if(i > 1)
+
+    return 0;
 } // parseCommand()
 
-void displaySensorDetails(void)
+void displaySensorDetails(uint8_t sensorStatus)
 {
     sensor_t sensor;
 
@@ -774,6 +790,7 @@ void displaySensorDetails(void)
 void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
 {
     uint8_t update = 0;
+    int32_t diff = 0;
 
     if(delta_millis >= configuration.time_to_next_update_average_accelerometer)
     {
@@ -787,6 +804,9 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_UPDATE_AVERAGE))
     {
+        Serial.println();
+        Serial.print(millis());
+        Serial.println(": Aavg");
         favg16(&valsAccelerometer);
     }
 
@@ -802,6 +822,12 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_REPORT))
     {
+        if(valsAccelerometer.filled_elements)
+        {
+            Serial.println();
+            Serial.print(millis());
+            Serial.println(": Arpt");
+
         Serial.print("Previous Average: ");
         Serial.print(valsAccelerometer.prev_average);
         Serial.println(" m/s^2");
@@ -810,9 +836,19 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
         Serial.print(valsAccelerometer.average);
         Serial.println(" m/s^2");
 
+            if(valsAccelerometer.prev_average > valsAccelerometer.average)
+            {
+                diff = -1 * (valsAccelerometer.prev_average - valsAccelerometer.average);
+            }
+            else
+            {
+                diff = valsAccelerometer.average - valsAccelerometer.prev_average;
+            }
+
         Serial.print("Delta: ");
-        Serial.print(valsAccelerometer.average - valsAccelerometer.prev_average);
+            Serial.print(diff);
         Serial.println(" m/s^2");
+    }
     }
 
     if(delta_millis >= configuration.time_to_next_update_accelerometer)
@@ -827,6 +863,9 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_UPDATE))
     {
+        Serial.println();
+        Serial.print(millis());
+        Serial.println(": Aapd");
         append16(&valsAccelerometer, sensorAccelerometerReadValue());
     }
 }
@@ -834,6 +873,7 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
 void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
 {
     uint8_t update = 0;
+    int32_t diff = 0;
 
     if(delta_millis >= configuration.time_to_next_update_average_magnetometer)
     {
@@ -847,6 +887,9 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_UPDATE_AVERAGE))
     {
+        Serial.println();
+        Serial.print(millis());
+        Serial.println(": Mavg");
         favg16(&valsMagnetometer);
     }
 
@@ -862,17 +905,32 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_REPORT))
     {
+        if(valsMagnetometer.filled_elements)
+        {
+            Serial.print(millis());
+            Serial.println(": Mrpt");
+
         Serial.print("Previous Average: ");
         Serial.print(valsMagnetometer.prev_average);
-        Serial.println(" m/s^2");
+            Serial.println(" uT");
 
         Serial.print("Average: ");
         Serial.print(valsMagnetometer.average);
-        Serial.println(" m/s^2");
+            Serial.println(" uT");
+
+            if(valsMagnetometer.prev_average > valsMagnetometer.average)
+            {
+                diff = -1 * (valsMagnetometer.prev_average - valsMagnetometer.average);
+            }
+            else
+            {
+                diff = valsMagnetometer.average - valsMagnetometer.prev_average;
+            }
 
         Serial.print("Delta: ");
-        Serial.print(valsMagnetometer.average - valsMagnetometer.prev_average);
-        Serial.println(" m/s^2");
+            Serial.print(diff);
+            Serial.println(" uT");
+    }
     }
 
     if(delta_millis >= configuration.time_to_next_update_magnetometer)
@@ -887,6 +945,9 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_UPDATE))
     {
+        Serial.println();
+        Serial.print(millis());
+        Serial.println(": Mapd");
         append16(&valsMagnetometer, sensorMagnetometerReadValue());
     }
 }
@@ -894,6 +955,7 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
 void doBarometerActions(uint16_t delta_millis, uint8_t force)
 {
     uint8_t update = 0;
+    int32_t diff = 0;
 
     if(delta_millis >= configuration.time_to_next_update_average_barometer)
     {
@@ -907,6 +969,9 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_UPDATE_AVERAGE))
     {
+        Serial.println();
+        Serial.print(millis());
+        Serial.println(": Bavg");
         favg32(&valsBarometer);
     }
 
@@ -922,17 +987,33 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_REPORT))
     {
+        if(valsBarometer.filled_elements)
+        {
+            Serial.println();
+            Serial.print(millis());
+            Serial.println(": Brpt");
+
         Serial.print("Previous Average: ");
         Serial.print(valsBarometer.prev_average);
-        Serial.println(" m/s^2");
+            Serial.println(" Pa");
 
         Serial.print("Average: ");
         Serial.print(valsBarometer.average);
-        Serial.println(" m/s^2");
+            Serial.println(" Pa");
+
+            if(valsBarometer.prev_average > valsBarometer.average)
+            {
+                diff = -1 * (valsBarometer.prev_average - valsBarometer.average);
+            }
+            else
+            {
+                diff = valsBarometer.average - valsBarometer.prev_average;
+            }
 
         Serial.print("Delta: ");
-        Serial.print(valsBarometer.average - valsBarometer.prev_average);
-        Serial.println(" m/s^2");
+            Serial.print(diff);
+            Serial.println(" Pa");
+        }
     }
 
     if(delta_millis >= configuration.time_to_next_update_barometer)
@@ -947,6 +1028,9 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_UPDATE))
     {
+        Serial.println();
+        Serial.print(millis());
+        Serial.println(": Bapd");
         append32(&valsBarometer, sensorBarometerReadValue());
     }
 }
@@ -1068,6 +1152,7 @@ void grabSerial()
 
 void setup()
 {
+    uint8_t sensorStatus = 0;
     Serial.begin(115200);
     Serial.println("setup() begins");
 
@@ -1124,7 +1209,7 @@ void setup()
     }
 
     // At least one sensor was initialized...
-    displaySensorDetails();
+    displaySensorDetails(sensorStatus);
     
     Serial.print("setup() ends at ");
     Serial.println(millis());
@@ -1160,6 +1245,8 @@ void tick(uint16_t delta_millis)
     {
         return;
     }
+
+    Serial.print(".");
 
     doAccelerometerActions(delta_millis, 0);
 
