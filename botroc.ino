@@ -13,6 +13,7 @@
 #define CLEAR_BIT(a, b) (a &= ~(0x1 << b))
 #define GET_BIT(a, b)   (a & (0x1 << b))
 
+#define BAROMETER_32BIT                         1
 
 #define INTSRC_INTERRUPT                        2
 #define INTSRC_GYROMETER                        -1
@@ -41,12 +42,16 @@
 #define STATE_GROUND_RECOVERY                   6   // ### Ground, recovery state
 #define STATE_GROUND_DATADUMP                   7   // ### Ground, data-dump state
 
-#define COMMAND_LINE_BUFFER_SIZE                32
+#define COMMAND_LINE_BUFFER_SIZE                16
 #define COMMAND_LINE_APPEND_THRESHOLD           ((COMMAND_LINE_BUFFER_SIZE / 4) * 3)
 
 #define SENSORS_BAROMETER_NUM_VALUES            16
 #define SENSORS_BAROMETER_SEALEVELHPA           SENSORS_PRESSURE_SEALEVELHPA
+#if BAROMETER_32BIT == 1
+#define SENSORS_BAROMETER_FACTOR_SCALING        100
+#else
 #define SENSORS_BAROMETER_FACTOR_SCALING        10
+#endif
 
 #define SENSORS_ACCELEROMETER_NUM_VALUES        16
 #define SENSORS_ACCELEROMETER_FACTOR_SCALING    10
@@ -54,6 +59,7 @@
 #define SENSORS_MAGNETOMETER_NUM_VALUES         16
 #define SENSORS_MAGNETOMETER_FACTOR_SCALING     10
 
+#if BAROMETER_32BIT == 1
 typedef struct {
     uint32_t values[16];
     uint32_t prev_average;
@@ -62,6 +68,7 @@ typedef struct {
     uint8_t next_element_to_fill;
     uint16_t spare;
 } savg16_32;
+#endif
 
 typedef struct {
     uint16_t values[16];
@@ -100,8 +107,6 @@ Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(24680);
 Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
 Adafruit_ADXL345_Unified acc = Adafruit_ADXL345_Unified(13579);
 
-byte sensorStatus = 0x0;
-
 char cmdline[COMMAND_LINE_BUFFER_SIZE] = { 0 };
 uint8_t cmdlength = 0;
 
@@ -130,20 +135,36 @@ sconfig configuration = {
     3500 // panic_timeout
 };
 
-savg16_32 valsBarometer         = {0};
-savg16_16 valsAccelerometer     = {0};
-savg16_16 valsMagnetometer      = {0};
+#if BAROMETER_32BIT == 1
+savg16_32 valsBarometer         = {};
+#else
+savg16_16 valsBarometer     = {};
+#endif
+savg16_16 valsAccelerometer     = {};
+savg16_16 valsMagnetometer      = {};
 
+/*
 uint32_t sensorBarometerValues[SENSORS_BAROMETER_NUM_VALUES] = { 0 };
 uint16_t sensorAccelerometerValues[SENSORS_ACCELEROMETER_NUM_VALUES] = { 0 };
 uint16_t sensorMagnetometerValues[SENSORS_MAGNETOMETER_NUM_VALUES] = { 0 };
+*/
 
 byte stateMachineState = STATE_GROUND_IDLE;
 
 // Set a default sea level (= 0m ASL) pressure
 float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA;
 
+uint16_t peakAltitudePressure = -1;
+
 float launchPadHeight = 0.0;
+
+// How many consequitive positive barometer deltas to read in a row to say we're
+//   steadily falling
+#define SENSORS_BAROMETER_STRIKES   3
+uint8_t barometerdeltastrikes = 3;
+
+uint8_t panicActivate = 0;
+uint16_t panicTimer = -1;
 
 uint32_t fsqrt(uint32_t arg)
 {
@@ -212,25 +233,6 @@ uint8_t append16(savg16_16 *vals, uint16_t value)
 
     return vals->filled_elements;
 }
-
-uint8_t append32(savg16_32 *vals, uint32_t value)
-{
-    // 0 is an error value
-    if(value == 0)
-    {
-        return vals->filled_elements;
-    }
-
-    vals->values[vals->next_element_to_fill] = value;
-    vals->next_element_to_fill = (vals->next_element_to_fill + 1) & 0xF;
-    if(vals->filled_elements < 16)
-    {
-        vals->filled_elements++;
-    }
-
-    return vals->filled_elements;
-}
-
 uint16_t favg16(savg16_16 *vals)
 {
     uint8_t i = 0;
@@ -266,6 +268,25 @@ uint16_t favg16(savg16_16 *vals)
     vals->average = avg;
 
     return avg;
+}
+
+#if BAROMETER_32BIT == 1
+uint8_t append32(savg16_32 *vals, uint32_t value)
+{
+    // 0 is an error value
+    if(value == 0)
+    {
+        return vals->filled_elements;
+    }
+
+    vals->values[vals->next_element_to_fill] = value;
+    vals->next_element_to_fill = (vals->next_element_to_fill + 1) & 0xF;
+    if(vals->filled_elements < 16)
+    {
+        vals->filled_elements++;
+    }
+
+    return vals->filled_elements;
 }
 
 uint32_t favg32(savg16_32 *vals)
@@ -314,7 +335,7 @@ uint32_t sensorBarometerReadValue()
 
     if(event.pressure)
     {
-        return (uint32_t)(event.pressure * 100);
+        return (uint32_t)(event.pressure * SENSORS_BAROMETER_FACTOR_SCALING);
     }
     else
     {
@@ -322,6 +343,24 @@ uint32_t sensorBarometerReadValue()
         return 0;
     }
 }
+#else
+uint16_t sensorBarometerReadValue()
+{
+    sensors_event_t event;
+
+    bmp.getEvent(&event);
+
+    if(event.pressure)
+    {
+        return (uint16_t)(event.pressure * SENSORS_BAROMETER_FACTOR_SCALING);
+    }
+    else
+    {
+        Serial.println("Barometer event error");
+        return 0;
+    }
+}
+#endif
 
 uint16_t sensorAccelerometerReadValue() {
     sensors_event_t event;
@@ -363,6 +402,7 @@ uint16_t sensorMagnetometerReadValue() {
     
 }
 
+#if 0
 void sensorBarometerGetHeightASL()
 {
     sensors_event_t event;
@@ -404,6 +444,7 @@ void sensorBarometerReadTemperature()
         Serial.println("Sensor event error");
     }
 }
+#endif
 
 uint8_t parseCommandConfiguration(uint8_t j)
 {
@@ -672,7 +713,7 @@ uint8_t parseCommand(void)
                 Serial.print("Command buffer length: ");
                 Serial.println(cmdlength);
                 
-                sensorBarometerReadTemperature();
+                //sensorBarometerReadTemperature();
                 
                 doBarometerActions(0, ((1 << STATUS_REPORT)|(1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)));
                 
@@ -972,7 +1013,11 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
         Serial.println();
         Serial.print(millis());
         Serial.println(": Bavg");
+#if BAROMETER_32BIT == 1
         favg32(&valsBarometer);
+#else
+        favg16(&valsBarometer);
+#endif
     }
 
     if(delta_millis >= configuration.time_to_next_report_barometer)
@@ -1031,8 +1076,30 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
         Serial.println();
         Serial.print(millis());
         Serial.println(": Bapd");
+#if BAROMETER_32BIT == 1
         append32(&valsBarometer, sensorBarometerReadValue());
+#else
+        append16(&valsBarometer, sensorBarometerReadValue());
+#endif
     }
+}
+
+void panicTimerCountdown()
+{
+    if(!panicActivate)
+    {
+        if(!panicTimer--)
+        {
+            panicActivate = 1;
+            Serial.println("Panic timeout!");
+        }
+    }
+}
+
+void panicTimerReset()
+{
+    panicTimer = configuration.panic_timeout;
+    panicActivate = 0;
 }
 
 void releaseTheKrakenshoot()
@@ -1049,6 +1116,7 @@ void engageAudioVisualBeacon()
 
 void stateMachine()
 {
+    int32_t diff = 0;
     switch(stateMachineState)
     {
         case STATE_GROUND_IDLE_ON_PAD:
@@ -1058,27 +1126,102 @@ void stateMachine()
         
         case STATE_GROUND_ARMED:
         {
+            // Check the two possible launch-indicative magnutides
+
+            // Accelerometer
+            if(valsAccelerometer.prev_average > valsAccelerometer.average)
+            {
+                diff = valsAccelerometer.prev_average - valsAccelerometer.average;
+            }
+            else
+            {
+                diff = valsAccelerometer.average - valsAccelerometer.prev_average;
+            }
+            
+            if(diff > configuration.limit_delta_accelerometer)
+            {
+                Serial.println("ACCELEROMETER MAGNITUDE ABOVE THRESHOLD");
+                stateMachineState = STATE_AIRBORNE_OUTBOUND;
+                panicTimerReset();
+            }
+
+            // Barometer
+            if(valsBarometer.prev_average > valsBarometer.average)
+            {
+                diff = valsBarometer.prev_average - valsBarometer.average;
+            }
+            else
+            {
+                diff = valsBarometer.average - valsBarometer.prev_average;
+            }
+            
+            if(diff > configuration.limit_delta_barometer)
+            {
+                Serial.println("BAROMETER MAGNITUDE ABOVE THRESHOLD");
+                stateMachineState = STATE_AIRBORNE_OUTBOUND;
+                panicTimerReset();
+            }
+
             break;
         }
         
         case STATE_AIRBORNE_OUTBOUND:
         {
+
+            // Check for lowest pressure yet
+            if(valsBarometer.average < peakAltitudePressure)
+            {
+                peakAltitudePressure = valsBarometer.average;
+            }
+
+            // Check for three consequitive positive barometer delta, indicating a steadily decreasing height
+            // A single positive value could perhaps simply be from pressure oscillations inside the payload capsule due to turbulence during launch, so we could get a premature deployment of parachute?
+            if(valsBarometer.prev_average > valsBarometer.average)
+            {
+                diff = valsBarometer.prev_average - valsBarometer.average;
+                Serial.println("BAROMETER MAGNITUDE ABOVE THRESHOLD");
+                barometerdeltastrikes--;
+            }
+            else
+            {
+                barometerdeltastrikes = SENSORS_BAROMETER_STRIKES;
+            }
+            
+            if(barometerdeltastrikes == 0)
+            {
+                Serial.println("THREE STRIKES; DEPLOYING");
+                stateMachineState = STATE_AIRBORNE_DEPLOYMENT;
+            }
+
+            if(panicActivate)
+            {
+                Serial.println("DEPLOYING DUE TO PANIC TIMEOUT");
+                stateMachineState = STATE_AIRBORNE_DEPLOYMENT;
+            }
+
             break;
         }
         
         case STATE_AIRBORNE_DEPLOYMENT:
         {
+            panicTimerReset();
             stateMachineState = STATE_AIRBORNE_INBOUND;
             break;
         }
         
         case STATE_AIRBORNE_INBOUND:
         {
+            if(panicActivate)
+            {
+                Serial.println("Activating locator beacon due to panic timeout.");
+                stateMachineState = STATE_GROUND_RECOVERY;
+            }
             break;
         }
         
         case STATE_GROUND_RECOVERY:
         {
+            // Wait for RBF to be re-applied
             break;
         }
         
@@ -1247,6 +1390,8 @@ void tick(uint16_t delta_millis)
     }
 
     Serial.print(".");
+
+    panicTimerCountdown();
 
     doAccelerometerActions(delta_millis, 0);
 
