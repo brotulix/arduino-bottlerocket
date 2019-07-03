@@ -4,11 +4,10 @@
 #endif
 
 #include <Wire.h>
-#include <Adafruit_Sensor.h>        // Adafruit Unified Sensor library
-#include <Adafruit_BMP085_U.h>      // BMP085 Barometer
-#include <Adafruit_ADXL345_U.h>     // ADXL345 Accelerometer
-#include <Adafruit_HMC5883_U.h>     // HMC5883 Magnetometer
-                                    // Gyro?
+#include <brxlib_sensors.h>        // *modified* Adafruit Unified Sensor library
+#include <brxlib_BMP085.h>      // BMP085 Barometer
+#include <brxlib_ADXL345.h>     // ADXL345 Accelerometer
+#include <brxlib_HMC5883.h>     // HMC5883 Magnetometer
 
 #define SET_BIT(a, b)   (a |= (0x1 << b))
 #define CLEAR_BIT(a, b) (a &= ~(0x1 << b))
@@ -104,9 +103,9 @@ typedef struct {
     uint16_t panic_timeout;
 } sconfig;
 
-Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(24680);
-Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
-Adafruit_ADXL345_Unified acc = Adafruit_ADXL345_Unified(13579);
+brxlib_BMP085 bmp = brxlib_BMP085(24680);
+brxlib_HMC5883 mag = brxlib_HMC5883(12345);
+brxlib_ADXL345 acc = brxlib_ADXL345(13579);
 
 char cmdline[COMMAND_LINE_BUFFER_SIZE] = { 0 };
 uint8_t cmdlength = 0;
@@ -153,11 +152,11 @@ uint16_t sensorMagnetometerValues[SENSORS_MAGNETOMETER_NUM_VALUES] = { 0 };
 byte stateMachineState = STATE_GROUND_IDLE;
 
 // Set a default sea level (= 0m ASL) pressure
-float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA;
+int32_t seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA;
 
 uint16_t peakAltitudePressure = -1;
 
-float launchPadHeight = 0.0;
+int32_t launchPadHeight = 0;
 
 // How many consequitive positive barometer deltas to read in a row to say we're
 //   steadily falling
@@ -363,7 +362,8 @@ uint16_t sensorBarometerReadValue()
 }
 #endif
 
-uint16_t sensorAccelerometerReadValue() {
+uint16_t sensorAccelerometerReadValue()
+{
     sensors_event_t event;
 
     acc.getEvent(&event);
@@ -379,7 +379,8 @@ uint16_t sensorAccelerometerReadValue() {
     }
 }
 
-uint16_t sensorMagnetometerReadValue() {
+uint16_t sensorMagnetometerReadValue()
+{
     sensors_event_t event; 
     mag.getEvent(&event);
 
@@ -790,9 +791,9 @@ void displaySensorDetails(uint8_t sensorStatus)
         Serial.print  ("Sensor:       "); Serial.println(sensor.name);
         Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
         Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
-        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" hPa");
-        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" hPa");
-        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" hPa");  
+        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" Pa");
+        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" Pa");
+        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" Pa");  
         Serial.println("------------------------------------");
         Serial.println("");
         Serial.flush();
@@ -805,9 +806,9 @@ void displaySensorDetails(uint8_t sensorStatus)
         Serial.print  ("Sensor:       "); Serial.println(sensor.name);
         Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
         Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
-        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" uT");
-        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" uT");
-        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" uT");  
+        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" nT");
+        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" nT");
+        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" nT");  
         Serial.println("------------------------------------");
         Serial.println("");
         Serial.flush();
@@ -820,9 +821,9 @@ void displaySensorDetails(uint8_t sensorStatus)
         Serial.print  ("Sensor:       "); Serial.println(sensor.name);
         Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
         Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
-        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" m/s^2");
-        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" m/s^2");
-        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" m/s^2");  
+        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" mm/s^2");
+        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" mm/s^2");
+        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" mm/s^2");  
         Serial.println("------------------------------------");
         Serial.println("");
         Serial.flush();

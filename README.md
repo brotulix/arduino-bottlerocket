@@ -757,8 +757,14 @@ X: -20.18  Y: -24.18  Z: -76.84  uT
 
 Looks good!
 
+Except, even with the smaller libraries, we've only gained 4 bytes of dynamic memory:
+```
+Sketch uses 14036 bytes (45%) of program storage space. Maximum is 30720 bytes.
+Global variables use 1951 bytes (95%) of dynamic memory, leaving 97 bytes for local variables. Maximum is 2048 bytes.
+```
 
-Now to rewrite the ADXL345 and HMC5883L drivers...
+At least it's 15768-14036 = 1732 byte smaller program code...
+
 
 # Proposals
 Some proposals for extended features:
