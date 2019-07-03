@@ -418,6 +418,9 @@ Various electronic components intended for inclusion:
 * 433 MHz RF Transceiver module (PCB+Antenna): 10.8 g
 * [Bluetooth transceiver module](https://www.dx.com/p/2011902): 3.5 g
 * [2.4 GHz RF Transceiver module](https://www.dx.com/p/2017524): 2.2 g
+* LoLin NodeMCU V3: 9.9 g
+* Geekworm Easy Kit ESP32-C1: 10.9 g
+
 
 
 ## Batteries
@@ -541,6 +544,221 @@ Area: <img src="doc/equations/Eq_017.svg" title="pi*((2.16cm)/2)^2) = 3.6644 cm^
 - <img src="doc/equations/Eq_020.svg" title="(kgf = ~= 18 [kg])" />
 
 
+
+# Problems and issues during development
+## Generic libraries
+Started out using the generic sensor libraries from Adafruit for the sensor board, but we reached the limit of dynamic memory very fast:
+```
+Sketch uses 16472 bytes (53%) of program storage space. Maximum is 30720 bytes.
+Global variables use 1993 bytes (97%) of dynamic memory, leaving 55 bytes for local variables. Maximum is 2048 bytes.
+```
+
+Even switching to 16 bit storage for barometer values didn't help much:
+```
+Sketch uses 15768 bytes (51%) of program storage space. Maximum is 30720 bytes.
+Global variables use 1955 bytes (95%) of dynamic memory, leaving 93 bytes for local variables. Maximum is 2048 bytes.
+```
+
+A coarse count of global storage for flight computer's own variables indicates
+* 246 byte with 32 bit barometer values and 32 byte cmdlength
+* 230 byte with 32 bit barometer values and 16 byte cmdlength
+* 208 byte with 16 bit barometer values and 32 byte cmdlength
+* 192 byte with 16 bit barometer values and 16 byte cmdlength
+
+The `magsensor` example (HMC5883L magnetometer) on its own:
+```
+Sketch uses 7726 bytes (25%) of program storage space. Maximum is 30720 bytes.
+Global variables use 663 bytes (32%) of dynamic memory, leaving 1385 bytes for local variables. Maximum is 2048 bytes.
+```
+
+The `sensortest` example (ADXL345 accelerometer) on its own: 
+```
+Sketch uses 8200 bytes (26%) of program storage space. Maximum is 30720 bytes.
+Global variables use 821 bytes (40%) of dynamic memory, leaving 1227 bytes for local variables. Maximum is 2048 bytes.
+```
+
+The `sensorapi` example (BMP085 barometer) on its own:
+```
+Sketch uses 9542 bytes (31%) of program storage space. Maximum is 30720 bytes.
+Global variables use 760 bytes (37%) of dynamic memory, leaving 1288 bytes for local variables. Maximum is 2048 bytes.
+```
+
+All three simply combined:
+```
+Sketch uses 13258 bytes (43%) of program storage space. Maximum is 30720 bytes.
+Global variables use 1084 bytes (52%) of dynamic memory, leaving 964 bytes for local variables. Maximum is 2048 bytes.
+```
+
+Changing from `-Os` to `-O3` yields:
+```
+Sketch uses 19622 bytes (63%) of program storage space. Maximum is 30720 bytes.
+Global variables use 1084 bytes (52%) of dynamic memory, leaving 964 bytes for local variables. Maximum is 2048 bytes.
+```
+
+Printing some sizes:
+
+```
+Size of Adafruit_HMC5883_Unified: 25
+Size of Adafruit_BMP085_Unified: 7
+Size of Adafruit_ADXL345_Unified: 15
+Size of sensors_event_t: 36
+Size of 'sensor_t': 40
+```
+
+Copied and rewrote the Adafruit_Unified_Sensor API to drop float, and the same with their BMP085 driver. This is the result of its `sensorapi` example:
+```
+Sketch uses 6162 bytes (20%) of program storage space. Maximum is 30720 bytes.
+Global variables use 689 bytes (33%) of dynamic memory, leaving 1359 bytes for local variables. Maximum is 2048 bytes.
+```
+
+9542-6162 = 3380 byte of program memory saved. 760 - 689 = 71 byte of dynamic memory saved. The example even works:
+```
+Pressure:    100751 Pa
+Temperature: 262 C
+Pressure:    100750 Pa
+Temperature: 262 C
+Pressure:    100747 Pa
+Temperature: 262 C
+Pressure:    102222 Pa
+Temperature: 263 C
+Pressure:    103799 Pa
+Temperature: 279 C
+Pressure:    100023 Pa
+Temperature: 289 C
+Pressure:    100309 Pa
+Temperature: 278 C
+Pressure:    100494 Pa
+Temperature: 271 C
+Pressure:    100589 Pa
+Temperature: 268 C
+Pressure:    100650 Pa
+Temperature: 266 C
+Pressure:    100687 Pa
+Temperature: 264 C
+```
+
+For the ADXL345, this is the result:
+```
+Sketch uses 6634 bytes (21%) of program storage space. Maximum is 30720 bytes.
+Global variables use 811 bytes (39%) of dynamic memory, leaving 1237 bytes for local variables. Maximum is 2048 bytes.
+```
+
+8200 - 6812 = 1388 bytes of program memory saved. 821 - 811 = 10 byte of dynamic memory saved.
+
+Didn't yield quite the expected readings with the modified library:
+```
+Accelerometer Test
+
+------------------------------------
+Sensor:       ADXL345
+Driver Ver:   1
+Unique ID:    12345
+Max Value:    -156906 mm/s^2
+Min Value:    156906 mm/s^2
+Resolution:   39 mm/s^2
+------------------------------------
+
+Data Rate:    100  Hz
+Range:         +/- 16  g
+
+X: -5060  Y: -11258  Z: 56174  mm/s^2
+X: -5060  Y: -11219  Z: 56135  mm/s^2
+X: -5021  Y: -11219  Z: 56096  mm/s^2
+X: -5021  Y: -11297  Z: 56174  mm/s^2
+X: -5060  Y: -11258  Z: 56135  mm/s^2
+```
+
+But neither did the stock Adafruit one:
+```
+Accelerometer Test
+
+------------------------------------
+Sensor:       ADXL345
+Driver Ver:   1
+Unique ID:    12345
+Max Value:    -156.91 m/s^2
+Min Value:    156.91 m/s^2
+Resolution:   0.04 m/s^2
+------------------------------------
+
+Data Rate:    100  Hz
+Range:         +/- 16  g
+
+X: -5.22  Y: -11.26  Z: 56.13  m/s^2
+X: -5.14  Y: -11.34  Z: 56.17  m/s^2
+X: -5.22  Y: -11.34  Z: 56.13  m/s^2
+X: -5.26  Y: -11.26  Z: 56.17  m/s^2
+X: -5.26  Y: -11.26  Z: 56.21  m/s^2
+```
+
+So whatever is wrong is not our fault -- at least not our code!
+
+The HMC5883 is no worse:
+```
+Sketch uses 5696 bytes (18%) of program storage space. Maximum is 30720 bytes.
+Global variables use 631 bytes (30%) of dynamic memory, leaving 1417 bytes for local variables. Maximum is 2048 bytes.
+```
+7726 - 5696 = 2030 bytes of program memory saved. 663 - 631 = 32 byte of dynamic memory saved.
+
+```
+HMC5883 Magnetometer Test
+
+------------------------------------
+Sensor:       HMC5883
+Driver Ver:   1
+Unique ID:    12345
+Max Value:    800000 nT
+Min Value:    -800000 nT
+Resolution:   20 nT
+------------------------------------
+
+X: -18  Y: -24  Z: -83  nT
+X: -18  Y: -24  Z: -83  nT
+X: -18  Y: -24  Z: -83  nT
+X: -18  Y: -24  Z: -83  nT
+X: -18  Y: -24  Z: -83  nT
+```
+
+Approaching the sensor with a magnet:
+```
+X: -18  Y: -24  Z: -83  nT
+X: -18  Y: -24  Z: -83  nT
+X: -18  Y: -24  Z: -83  nT
+X: -51  Y: 109  Z: -161  nT
+X: 21  Y: 24  Z: -55  nT
+X: 25  Y: 33  Z: -58  nT
+X: 19  Y: 104  Z: -85  nT
+X: -19  Y: 164  Z: -110  nT
+X: -29  Y: 88  Z: -91  nT
+X: -16  Y: -26  Z: -76  nT
+X: -15  Y: -26  Z: -76  nT
+X: -15  Y: -26  Z: -76  nT
+```
+
+Compared to the Adafruit driver:
+```
+HMC5883 Magnetometer Test
+
+------------------------------------
+Sensor:       HMC5883
+Driver Ver:   1
+Unique ID:    12345
+Max Value:    800.00 uT
+Min Value:    -800.00 uT
+Resolution:   0.20 uT
+------------------------------------
+
+X: -20.00  Y: -24.18  Z: -76.63  uT
+X: -20.27  Y: -24.09  Z: -77.04  uT
+X: -20.27  Y: -24.09  Z: -76.53  uT
+X: -20.45  Y: -23.91  Z: -76.63  uT
+X: -20.18  Y: -24.18  Z: -76.84  uT
+```
+
+Looks good!
+
+
+Now to rewrite the ADXL345 and HMC5883L drivers...
 
 # Proposals
 Some proposals for extended features:

@@ -1,8 +1,9 @@
 // If using eg. Visual Studio Code with Arduino plugin, ARDUINO may not be set:
 #ifndef ARDUINO
-#define ARDUINO 185
+#define ARDUINO 189
 #endif
 
+#include <Wire.h>
 #include <Adafruit_Sensor.h>        // Adafruit Unified Sensor library
 #include <Adafruit_BMP085_U.h>      // BMP085 Barometer
 #include <Adafruit_ADXL345_U.h>     // ADXL345 Accelerometer
@@ -13,7 +14,7 @@
 #define CLEAR_BIT(a, b) (a &= ~(0x1 << b))
 #define GET_BIT(a, b)   (a & (0x1 << b))
 
-#define BAROMETER_32BIT                         1
+#define BAROMETER_32BIT                         0
 
 #define INTSRC_INTERRUPT                        2
 #define INTSRC_GYROMETER                        -1
