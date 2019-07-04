@@ -13,7 +13,7 @@
 #define CLEAR_BIT(a, b) (a &= ~(0x1 << b))
 #define GET_BIT(a, b)   (a & (0x1 << b))
 
-#define BAROMETER_32BIT                         0
+#define SENSORS_32BIT                         1
 
 #define INTSRC_INTERRUPT                        2
 #define INTSRC_GYROMETER                        -1
@@ -47,7 +47,7 @@
 
 #define SENSORS_BAROMETER_NUM_VALUES            16
 #define SENSORS_BAROMETER_SEALEVELHPA           SENSORS_PRESSURE_SEALEVELHPA
-#if BAROMETER_32BIT == 1
+#if SENSORS_32BIT
 #define SENSORS_BAROMETER_FACTOR_SCALING        100
 #else
 #define SENSORS_BAROMETER_FACTOR_SCALING        10
@@ -59,24 +59,24 @@
 #define SENSORS_MAGNETOMETER_NUM_VALUES         16
 #define SENSORS_MAGNETOMETER_FACTOR_SCALING     10
 
-#if BAROMETER_32BIT == 1
+#if SENSORS_32BIT
 typedef struct {
-    uint32_t values[16];
-    uint32_t prev_average;
-    uint32_t average;
+    int32_t values[16];
+    int32_t prev_average;
+    int32_t average;
     uint8_t filled_elements;
     uint8_t next_element_to_fill;
     uint16_t spare;
 } savg16_32;
-#endif
-
+#else
 typedef struct {
-    uint16_t values[16];
-    uint16_t prev_average;
-    uint16_t average;
+    int16_t values[16];
+    int16_t prev_average;
+    int16_t average;
     uint8_t filled_elements;
     uint8_t next_element_to_fill;
 } savg16_16;
+#endif // SENSORS_32BIT
 
 typedef struct {
     uint32_t millis_previous_loop;
@@ -112,17 +112,17 @@ uint8_t cmdlength = 0;
 
 sconfig configuration = {
     0,   // millis_previous_loop
-    2500,  // interval_refresh_accelerometer
-    2500,  // interval_refresh_magnetometer
-    2500,  // interval_refresh_barometer
-    10000,  // interval_refresh_average_accelerometer
-    10000,  // interval_refresh_average_magnetometer
-    10000,  // interval_refresh_average_barometer
-    30000,  // interval_report_accelerometer
-    30000,  // interval_report_magnetometer
-    30000,  // interval_report_barometer
-    200,  // limit_delta_barometer
-    100,  // limit_delta_accelerometer
+    5,  // interval_refresh_accelerometer
+    50,  // interval_refresh_magnetometer
+    25,  // interval_refresh_barometer
+    25,  // interval_refresh_average_accelerometer
+    250,  // interval_refresh_average_magnetometer
+    100,  // interval_refresh_average_barometer
+    25,  // interval_report_accelerometer
+    250,  // interval_report_magnetometer
+    100,  // interval_report_barometer
+    250,  // limit_delta_barometer
+    250,  // limit_delta_accelerometer
     0,  // time_to_next_update_accelerometer
     0,  // time_to_next_update_magnetometer
     0,  // time_to_next_update_barometer
@@ -135,13 +135,15 @@ sconfig configuration = {
     3500 // panic_timeout
 };
 
-#if BAROMETER_32BIT == 1
+#if SENSORS_32BIT
 savg16_32 valsBarometer         = {};
+savg16_32 valsAccelerometer     = {};
+savg16_32 valsMagnetometer      = {};
 #else
-savg16_16 valsBarometer     = {};
-#endif
+savg16_16 valsBarometer         = {};
 savg16_16 valsAccelerometer     = {};
 savg16_16 valsMagnetometer      = {};
+#endif
 
 /*
 uint32_t sensorBarometerValues[SENSORS_BAROMETER_NUM_VALUES] = { 0 };
@@ -166,7 +168,37 @@ uint8_t barometerdeltastrikes = 3;
 uint8_t panicActivate = 0;
 uint16_t panicTimer = -1;
 
-uint32_t fsqrt(uint32_t arg)
+uint32_t vlen3D(int32_t x, int32_t y, int32_t z)
+{
+    uint64_t sq = 0;
+    uint64_t sum = 0;
+
+    sq = (uint64_t)(x*x);
+    sum += sq;
+    sq = (uint64_t)(y*y);
+    sum += sq;
+    sq = (uint64_t)(z*z);
+    sum += sq;
+
+    return fsqrt64(sum);
+
+}
+
+uint32_t vlen2D(int32_t x, int32_t y)
+{
+    uint64_t sq = 0;
+    uint64_t sum = 0;
+
+    sq = (uint64_t)(x*x);
+    sum += sq;
+    sq = (uint64_t)(y*y);
+    sum += sq;
+
+    return fsqrt64(sum);
+
+}
+
+uint32_t fsqrt32(uint32_t arg)
 {
     uint64_t sq = 0;
     //uint32_t fg = (arg >> 1); // start with half the value
@@ -216,7 +248,59 @@ uint32_t fsqrt(uint32_t arg)
 
 }
 
-uint8_t append16(savg16_16 *vals, uint16_t value)
+uint32_t fsqrt64(uint64_t arg)
+{
+    uint64_t sq = 0;
+    //uint32_t fg = (arg >> 1); // start with half the value
+    uint8_t i = 0;
+    uint32_t res = 0;
+    uint64_t temp = 0;
+    if(arg == 0)
+    {
+        return 0;
+    }
+
+    if(arg == 1)
+    {
+        return 1;
+    }
+
+    // Find the largest bit in fg
+    for(i = 63; !((arg >> 1) & (0x1 << i)) && (i > 0); i--)
+    {
+        // Do nothing
+    }
+
+    res = 0;
+    i++;
+
+    for(; i > 0; i--)
+    {
+        temp = res | (1 << (i-1));
+        
+        sq = temp*temp;
+        
+        if(sq > arg)
+        {
+            continue;
+        }
+
+        res = temp;
+
+        if(sq == arg)
+        {
+            // Perfect match
+            break;
+        }
+    }
+
+    return res;
+
+}
+
+
+#if SENSORS_32BIT
+uint8_t append32(savg16_32 *vals, int32_t value)
 {
     // 0 is an error value
     if(value == 0)
@@ -233,12 +317,13 @@ uint8_t append16(savg16_16 *vals, uint16_t value)
 
     return vals->filled_elements;
 }
-uint16_t favg16(savg16_16 *vals)
+
+int32_t favg32(savg16_32 *vals)
 {
     uint8_t i = 0;
     uint8_t j = 0;
-    uint32_t sum = 0;
-    uint32_t avg = 0;
+    int64_t sum = 0;
+    int32_t avg = 0;
 
     // Catch the first call.
     if(vals->filled_elements == 0)
@@ -255,70 +340,7 @@ uint16_t favg16(savg16_16 *vals)
         j = (j + 1) & 0xF;
     }
 
-    if(vals->filled_elements == 16)
-    {
-        avg = sum >> 4;
-    }
-    else
-    {
-        avg = sum / vals->filled_elements;
-    }
-
-    vals->prev_average = vals->average;
-    vals->average = avg;
-
-    return avg;
-}
-
-#if BAROMETER_32BIT == 1
-uint8_t append32(savg16_32 *vals, uint32_t value)
-{
-    // 0 is an error value
-    if(value == 0)
-    {
-        return vals->filled_elements;
-    }
-
-    vals->values[vals->next_element_to_fill] = value;
-    vals->next_element_to_fill = (vals->next_element_to_fill + 1) & 0xF;
-    if(vals->filled_elements < 16)
-    {
-        vals->filled_elements++;
-    }
-
-    return vals->filled_elements;
-}
-
-uint32_t favg32(savg16_32 *vals)
-{
-    uint8_t i = 0;
-    uint8_t j = 0;
-    uint64_t sum = 0;
-    uint32_t avg = 0;
-
-    // Catch the first call.
-    if(vals->filled_elements == 0)
-    {
-        return 0;
-    }
-
-    // Point to the first element:
-    j = (vals->next_element_to_fill + 16 - vals->filled_elements) & 0xF;
-
-    for(i = 0; i < vals->filled_elements; i++)
-    {
-        sum += vals->values[j];        
-        j = (j + 1) & 0xF;
-    }
-
-    if(vals->filled_elements == 16)
-    {
-        avg = sum >> 4;
-    }
-    else
-    {
-        avg = sum / vals->filled_elements;
-    }
+    avg = sum / vals->filled_elements;
 
     vals->prev_average = vals->average;
     vals->average = avg;
@@ -327,7 +349,7 @@ uint32_t favg32(savg16_32 *vals)
 
 }
 
-uint32_t sensorBarometerReadValue()
+int32_t sensorBarometerReadValue()
 {
     sensors_event_t event;
 
@@ -335,34 +357,16 @@ uint32_t sensorBarometerReadValue()
 
     if(event.pressure)
     {
-        return (uint32_t)(event.pressure * SENSORS_BAROMETER_FACTOR_SCALING);
+        return (int32_t)event.pressure;
     }
     else
     {
-        Serial.println("Barometer event error");
+        //Serial.println("Barometer event error");
         return 0;
     }
 }
-#else
-uint16_t sensorBarometerReadValue()
-{
-    sensors_event_t event;
 
-    bmp.getEvent(&event);
-
-    if(event.pressure)
-    {
-        return (uint16_t)(event.pressure * SENSORS_BAROMETER_FACTOR_SCALING);
-    }
-    else
-    {
-        Serial.println("Barometer event error");
-        return 0;
-    }
-}
-#endif
-
-uint16_t sensorAccelerometerReadValue()
+int32_t sensorAccelerometerReadValue()
 {
     sensors_event_t event;
 
@@ -370,42 +374,82 @@ uint16_t sensorAccelerometerReadValue()
 
     if(event.acceleration.x || event.acceleration.y || event.acceleration.z)
     {
-        return (uint16_t)fsqrt(((event.acceleration.x * event.acceleration.x)*10) + ((event.acceleration.y * event.acceleration.y)*10) + ((event.acceleration.z * event.acceleration.z)*10));
+        return vlen3D(event.acceleration.x, event.acceleration.y, event.acceleration.z);
     }
     else
     {
-        Serial.println("Accelerometer event error");
+        //Serial.println("Accelerometer event error");
         return 0;
     }
 }
 
-uint16_t sensorMagnetometerReadValue()
+int32_t sensorMagnetometerReadValue()
 {
     sensors_event_t event; 
     mag.getEvent(&event);
 
     if(event.magnetic.x || event.magnetic.y || event.magnetic.z)
     {
-        /* Display the results (magnetic vector values are in micro-Tesla (uT)) */
-        /*
-        Serial.print("X: "); Serial.print(event.magnetic.x); Serial.print("  ");
-        Serial.print("Y: "); Serial.print(event.magnetic.y); Serial.print("  ");
-        Serial.print("Z: "); Serial.print(event.magnetic.z); Serial.print("  ");Serial.println("uT");
-        */
-
-        return (uint16_t)fsqrt(((event.magnetic.x * event.magnetic.x)*10) + ((event.magnetic.y * event.magnetic.y)*10) + ((event.magnetic.z * event.magnetic.z)*10));
+        return vlen3D(event.magnetic.x, event.magnetic.y, event.magnetic.z);
 
     }
     else
     {
-        Serial.println("Magnetometer event error");
+        //Serial.println("Magnetometer event error");
         return 0;
     }
     
 }
+#else
+uint8_t append16(savg16_16 *vals, int16_t value)
+{
+    // 0 is an error value
+    if(value == 0)
+    {
+        return vals->filled_elements;
+    }
 
-#if 0
-void sensorBarometerGetHeightASL()
+    vals->values[vals->next_element_to_fill] = value;
+    vals->next_element_to_fill = (vals->next_element_to_fill + 1) & 0xF;
+    if(vals->filled_elements < 16)
+    {
+        vals->filled_elements++;
+    }
+
+    return vals->filled_elements;
+}
+
+int16_t favg16(savg16_16 *vals)
+{
+    uint8_t i = 0;
+    uint8_t j = 0;
+    int32_t sum = 0;
+    int32_t avg = 0;
+
+    // Catch the first call.
+    if(vals->filled_elements == 0)
+    {
+        return 0;
+    }
+
+    // Point to the first element:
+    j = (vals->next_element_to_fill + 16 - vals->filled_elements) & 0xF;
+
+    for(i = 0; i < vals->filled_elements; i++)
+    {
+        sum += vals->values[j];        
+        j = (j + 1) & 0xF;
+    }
+
+    avg = sum / vals->filled_elements;
+
+    vals->prev_average = vals->average;
+    vals->average = avg;
+
+    return avg;
+}
+
+int16_t sensorBarometerReadValue()
 {
     sensors_event_t event;
 
@@ -413,19 +457,53 @@ void sensorBarometerGetHeightASL()
 
     if(event.pressure)
     {
-        /* Then convert the atmospheric pressure, and SLP to altitude         */
-        /* Update this next line with the current SLP for better results      */
-        Serial.print("Altitude:    "); 
-        Serial.print(bmp.pressureToAltitude(seaLevelPressure, event.pressure)); 
-        Serial.println(" m");
-        Serial.println("");
+        return (int16_t)event.pressure;
     }
     else
     {
-        Serial.println("Sensor event error");
+        //Serial.println("Barometer event error");
+        return 0;
     }
 }
 
+int16_t sensorAccelerometerReadValue()
+{
+    sensors_event_t event;
+
+    acc.getEvent(&event);
+
+    if(event.acceleration.x || event.acceleration.y || event.acceleration.z)
+    {
+        return (int16_t)fsqrt32(((event.acceleration.x * event.acceleration.x)) + ((event.acceleration.y * event.acceleration.y)) + ((event.acceleration.z * event.acceleration.z)));
+    }
+    else
+    {
+        //Serial.println("Accelerometer event error");
+        return 0;
+    }
+}
+
+int16_t sensorMagnetometerReadValue()
+{
+    sensors_event_t event; 
+    mag.getEvent(&event);
+
+    if(event.magnetic.x || event.magnetic.y || event.magnetic.z)
+    {
+        return (int16_t)fsqrt32(((event.magnetic.x * event.magnetic.x)) + ((event.magnetic.y * event.magnetic.y)) + ((event.magnetic.z * event.magnetic.z)));
+
+    }
+    else
+    {
+        //Serial.println("Magnetometer event error");
+        return 0;
+    }
+    
+}
+#endif
+
+
+#if 0
 void sensorBarometerReadTemperature()
 {
     sensors_event_t event;
@@ -454,24 +532,24 @@ uint8_t parseCommandConfiguration(uint8_t j)
     {
         case 'A': // Averaging
         {
-            Serial.println("Averaging");
+            //Serial.println("Averaging");
             switch(cmdline[j++])
             {
                 case 'A': // Accelerometer
                 {
-                    Serial.println("Accelerometer");
+                    //Serial.println("Accelerometer");
                     break;
                 }
 
                 case 'B': // Barometer
                 {
-                    Serial.println("Barometer");
+                    //Serial.println("Barometer");
                     break;
                 }
 
                 case 'M': // Magnetometer
                 {
-                    Serial.println("Magnetometer");
+                    //Serial.println("Magnetometer");
                     break;
                 }
 
@@ -483,37 +561,37 @@ uint8_t parseCommandConfiguration(uint8_t j)
         
         case 'G': // Launch pad height
         {
-            Serial.println("Sea level pressure");
+            //Serial.println("Sea level pressure");
             break;
         }
 
         case 'H': // Launch pad height
         {
-            Serial.println("Height");
+            //Serial.println("Height");
             break;
         }
 
         case 'L': // Limits
         {
-            Serial.println("Limits");
+            //Serial.println("Limits");
 
             switch(cmdline[j++])
             {
                 case 'A': // Accelerometer
                 {
-                    Serial.println("Accelerometer");
+                    //Serial.println("Accelerometer");
 
                     switch(cmdline[j++])
                     {
                         case 'I': // Inbound
                         {
-                            Serial.println("Inbound");
+                            //Serial.println("Inbound");
                             break;
                         }
                         
                         case 'O': // Outbound
                         {
-                            Serial.println("Outbound");
+                            //Serial.println("Outbound");
                             break;
                         }
 
@@ -526,13 +604,13 @@ uint8_t parseCommandConfiguration(uint8_t j)
 
                 case 'B': // Barometer
                 {
-                    Serial.println("Barometer");
+                    //Serial.println("Barometer");
                     break;
                 }
 
                 case 'M': // Magnetometer
                 {
-                    Serial.println("Magnetometer");
+                    //Serial.println("Magnetometer");
                     break;
                 }
 
@@ -544,18 +622,18 @@ uint8_t parseCommandConfiguration(uint8_t j)
         
         case 'T': // Timeouts
         {
-            Serial.println("Timeouts");
+            //Serial.println("Timeouts");
             switch(cmdline[j++])
             {
                 case 'I': // Inbound
                 {
-                    Serial.println("Inbound");
+                    //Serial.println("Inbound");
                     break;
                 }
 
                 case 'O': // Outbound
                 {
-                    Serial.println("Outbound");
+                    //Serial.println("Outbound");
                     break;
                 }
 
@@ -680,24 +758,24 @@ uint8_t parseCommand(void)
 
             case 'C': // Configuration
             {
-                Serial.print("Configuration command ");
+                //Serial.print("Configuration command ");
                 if(
                     (stateMachineState == STATE_GROUND_IDLE)
                     ||
                     (stateMachineState == STATE_GROUND_IDLE_ON_PAD)
                 )
                 {
-                    Serial.println("input");
+                    //Serial.println("input");
                     j = parseCommandConfiguration(j);
                     if(j < i)
                     {
-                        Serial.println("There were leftover characters!");
+                        //Serial.println("There were leftover characters!");
                     }
                     return j;
                 }
                 else
                 {
-                    Serial.println("in wrong mode!");
+                    //Serial.println("in wrong mode!");
                     // Ignore the command
                     return i;
                 }
@@ -722,7 +800,63 @@ uint8_t parseCommand(void)
                 doAccelerometerActions(0, ((1 << STATUS_REPORT)|(1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)));
                 
                 doMagnetometerActions(0, ((1 << STATUS_REPORT)|(1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)));
+
+                Serial.print("Current Accelerometer value: ");
+                Serial.println(sensorAccelerometerReadValue());
+
+                Serial.print("Current Accelerometer vector: ");
+                sensors_event_t event; 
+                acc.getEvent(&event);
+
+                uint32_t x, y, z;
+
+                if(event.acceleration.x || event.acceleration.y || event.acceleration.z)
+                {
+                    Serial.print("[");
+                    Serial.print(event.acceleration.x);
+                    Serial.print(", ");
+                    Serial.print(event.acceleration.y);
+                    Serial.print(",  ");
+                    Serial.print(event.acceleration.z);
+                    Serial.print("] |v| = ");
+                    x = (uint32_t)event.acceleration.x;
+                    y = (uint32_t)event.acceleration.y;
+                    z = (uint32_t)event.acceleration.z;
+                    Serial.println(vlen3D(x, y, z));
+                }
+                else
+                {
+                    Serial.println("Error");
+                }
+
+                Serial.print("Current Barometer value: ");
+                Serial.println(sensorBarometerReadValue());
+
+                Serial.print("Current Magnetometer value: ");
+                Serial.println(sensorMagnetometerReadValue());
                 
+                Serial.print("Current Magnetometer vector: ");
+                mag.getEvent(&event);
+
+                if(event.magnetic.x || event.magnetic.y || event.magnetic.z)
+                {
+                    Serial.print("[");
+                    Serial.print(event.magnetic.x);
+                    Serial.print(", ");
+                    Serial.print(event.magnetic.y);
+                    Serial.print(",  ");
+                    Serial.print(event.magnetic.z);
+                    Serial.print("] |v| = ");
+                    x = (uint32_t)event.magnetic.x;
+                    y = (uint32_t)event.magnetic.y;
+                    z = (uint32_t)event.magnetic.z;
+                    Serial.println(vlen3D(x, y, z));
+                }
+                else
+                {
+                    Serial.println("Error");
+                }
+
                 return i;
                 break;
             }
@@ -744,7 +878,7 @@ uint8_t parseCommand(void)
                     return i;
                 }
 
-                Serial.print("State change ");
+                //Serial.print("State change ");
                 j = (uint8_t)cmdline[j++] - 0x30;
                 if(j >= 8)
                 {
@@ -753,10 +887,10 @@ uint8_t parseCommand(void)
                     return i;
                     break;
                 }
-                Serial.print("from S");
-                Serial.print(stateMachineState);
-                Serial.print(" to S");
-                Serial.println(j);
+                //Serial.print("from S");
+                //Serial.print(stateMachineState);
+                //Serial.print(" to S");
+                //Serial.println(j);
                 stateMachineState = j;
                 return i;
                 break;
@@ -764,7 +898,8 @@ uint8_t parseCommand(void)
             
             default:
             {
-                Serial.println("E: Command not recognized.");
+                //Serial.println("E: Command not recognized.");
+                Serial.println("E");
                 return i;
                 break;
             }
@@ -776,7 +911,10 @@ uint8_t parseCommand(void)
 
 void displaySensorDetails(uint8_t sensorStatus)
 {
+#define SENSOR_REPORT 0
+#if SENSOR_REPORT
     sensor_t sensor;
+#endif
 
     if(!sensorStatus)
     {
@@ -784,6 +922,16 @@ void displaySensorDetails(uint8_t sensorStatus)
         return;
     }
     
+    if(!(
+        GET_BIT(sensorStatus, STATUS_BAROMETER_DETECTED) && 
+        GET_BIT(sensorStatus, STATUS_MAGNETOMETER_DETECTED) && 
+        GET_BIT(sensorStatus, STATUS_ACCELEROMETER_DETECTED)
+    ))
+    {
+        Serial.println("E: At least one sensor not detected.");
+    }
+
+#if SENSOR_REPORT
     if(GET_BIT(sensorStatus, STATUS_BAROMETER_DETECTED))
     {
         bmp.getSensor(&sensor);
@@ -828,6 +976,7 @@ void displaySensorDetails(uint8_t sensorStatus)
         Serial.println("");
         Serial.flush();
     }
+#endif
 }
 
 void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
@@ -847,10 +996,14 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_UPDATE_AVERAGE))
     {
-        Serial.println();
-        Serial.print(millis());
-        Serial.println(": Aavg");
+        //Serial.println();
+        //Serial.print(millis());
+        //Serial.println(": Aavg");
+#if SENSORS_32BIT
+        favg32(&valsAccelerometer);
+#else
         favg16(&valsAccelerometer);
+#endif
     }
 
     if(delta_millis >= configuration.time_to_next_report_accelerometer)
@@ -867,17 +1020,19 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
     {
         if(valsAccelerometer.filled_elements)
         {
-            Serial.println();
+            //Serial.println();
             Serial.print(millis());
-            Serial.println(": Arpt");
+            Serial.print("\tR\tA\t");
 
-        Serial.print("Previous Average: ");
-        Serial.print(valsAccelerometer.prev_average);
-        Serial.println(" m/s^2");
+            //Serial.print("Previous Average: ");
+            Serial.print(valsAccelerometer.prev_average);
+            Serial.print("\t");
+            //Serial.println(" mm/s^2");
 
-        Serial.print("Average: ");
-        Serial.print(valsAccelerometer.average);
-        Serial.println(" m/s^2");
+            //Serial.print("Average: ");
+            Serial.print(valsAccelerometer.average);
+            Serial.print("\t");
+            //Serial.println(" mm/s^2");
 
             if(valsAccelerometer.prev_average > valsAccelerometer.average)
             {
@@ -888,9 +1043,10 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
                 diff = valsAccelerometer.average - valsAccelerometer.prev_average;
             }
 
-        Serial.print("Delta: ");
+            //Serial.print("Delta: ");
             Serial.print(diff);
-        Serial.println(" m/s^2");
+            Serial.println();
+            //Serial.println(" mm/s^2");
     }
     }
 
@@ -906,10 +1062,14 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_UPDATE))
     {
-        Serial.println();
-        Serial.print(millis());
-        Serial.println(": Aapd");
+        //Serial.println();
+        //Serial.print(millis());
+        //Serial.println(": Aapd");
+#if SENSORS_32BIT
+        append32(&valsAccelerometer, sensorAccelerometerReadValue());
+#else
         append16(&valsAccelerometer, sensorAccelerometerReadValue());
+#endif
     }
 }
 
@@ -930,10 +1090,14 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_UPDATE_AVERAGE))
     {
-        Serial.println();
-        Serial.print(millis());
-        Serial.println(": Mavg");
+        //Serial.println();
+        //Serial.print(millis());
+        //Serial.println(": Mavg");
+#if SENSORS_32BIT
+        favg32(&valsMagnetometer);
+#else
         favg16(&valsMagnetometer);
+#endif
     }
 
     if(delta_millis >= configuration.time_to_next_report_magnetometer)
@@ -950,16 +1114,20 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
     {
         if(valsMagnetometer.filled_elements)
         {
+            //Serial.println();
             Serial.print(millis());
-            Serial.println(": Mrpt");
+            Serial.print("\tR\tM\t");
+            //Serial.println(": Mrpt");
 
-        Serial.print("Previous Average: ");
-        Serial.print(valsMagnetometer.prev_average);
-            Serial.println(" uT");
+            //Serial.print("Previous Average: ");
+            Serial.print(valsMagnetometer.prev_average);
+            Serial.print("\t");
+            //Serial.println(" nT");
 
-        Serial.print("Average: ");
-        Serial.print(valsMagnetometer.average);
-            Serial.println(" uT");
+            //Serial.print("Average: ");
+            Serial.print(valsMagnetometer.average);
+            Serial.print("\t");
+            //Serial.println(" nT");
 
             if(valsMagnetometer.prev_average > valsMagnetometer.average)
             {
@@ -970,9 +1138,10 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
                 diff = valsMagnetometer.average - valsMagnetometer.prev_average;
             }
 
-        Serial.print("Delta: ");
+            //Serial.print("Delta: ");
             Serial.print(diff);
-            Serial.println(" uT");
+            Serial.println();
+            //Serial.println(" nT");
     }
     }
 
@@ -988,10 +1157,14 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_UPDATE))
     {
-        Serial.println();
-        Serial.print(millis());
-        Serial.println(": Mapd");
+        //Serial.println();
+        //Serial.print(millis());
+        //Serial.println(": Mapd");
+#if SENSORS_32BIT
+        append32(&valsMagnetometer, sensorMagnetometerReadValue());
+#else
         append16(&valsMagnetometer, sensorMagnetometerReadValue());
+#endif
     }
 }
 
@@ -1012,10 +1185,10 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_UPDATE_AVERAGE))
     {
-        Serial.println();
-        Serial.print(millis());
-        Serial.println(": Bavg");
-#if BAROMETER_32BIT == 1
+        //Serial.println();
+        //Serial.print(millis());
+        //Serial.println(": Bavg");
+#if SENSORS_32BIT
         favg32(&valsBarometer);
 #else
         favg16(&valsBarometer);
@@ -1036,17 +1209,20 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
     {
         if(valsBarometer.filled_elements)
         {
-            Serial.println();
+            //Serial.println();
             Serial.print(millis());
-            Serial.println(": Brpt");
+            Serial.print("\tR\tB\t");
+            //Serial.println(": Brpt");
 
-        Serial.print("Previous Average: ");
-        Serial.print(valsBarometer.prev_average);
-            Serial.println(" Pa");
+            //Serial.print("Previous Average: ");
+            Serial.print(valsBarometer.prev_average);
+            Serial.print("\t");
+            //Serial.println(" Pa");
 
-        Serial.print("Average: ");
-        Serial.print(valsBarometer.average);
-            Serial.println(" Pa");
+            //Serial.print("Average: ");
+            Serial.print(valsBarometer.average);
+            Serial.print("\t");
+            //Serial.println(" Pa");
 
             if(valsBarometer.prev_average > valsBarometer.average)
             {
@@ -1057,9 +1233,10 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
                 diff = valsBarometer.average - valsBarometer.prev_average;
             }
 
-        Serial.print("Delta: ");
+            //Serial.print("Delta: ");
             Serial.print(diff);
-            Serial.println(" Pa");
+            Serial.println();
+            //Serial.println(" Pa");
         }
     }
 
@@ -1075,10 +1252,10 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
 
     if(update | GET_BIT(force, STATUS_UPDATE))
     {
-        Serial.println();
-        Serial.print(millis());
-        Serial.println(": Bapd");
-#if BAROMETER_32BIT == 1
+        //Serial.println();
+        //Serial.print(millis());
+        //Serial.println(": Bapd");
+#if SENSORS_32BIT
         append32(&valsBarometer, sensorBarometerReadValue());
 #else
         append16(&valsBarometer, sensorBarometerReadValue());
@@ -1301,6 +1478,7 @@ void setup()
     Serial.begin(115200);
     Serial.println("setup() begins");
 
+    /*
     Serial.print("UART RX Buffer size: ");
     Serial.println(SERIAL_RX_BUFFER_SIZE);
 
@@ -1309,16 +1487,19 @@ void setup()
 
     Serial.print("Command line fill threshold: ");
     Serial.println(COMMAND_LINE_APPEND_THRESHOLD);
-
-    Serial.println("Clearing command buffer...");
+    */
+    
+    //Serial.println("Clearing command buffer...");
     for(cmdlength = COMMAND_LINE_BUFFER_SIZE; cmdlength > 0; cmdlength--)
     {
         cmdline[cmdlength-1] = '\0';
     }
     
+    /*
     Serial.print("Command line length: ");
     Serial.println(cmdlength);
-
+    */
+    
     Serial.println("Setting up pins...");
 
     pinMode(INTSRC_INTERRUPT, INPUT);
@@ -1333,7 +1514,7 @@ void setup()
     Serial.println("Barometer...");
     SET_BIT(sensorStatus, STATUS_BAROMETER_DETECTED);
     if (!bmp.begin()) {
-        Serial.println("ERROR: BMP085 not detected!");
+        Serial.println("E");
         CLEAR_BIT(sensorStatus, STATUS_BAROMETER_DETECTED);
     }
 
@@ -1341,7 +1522,7 @@ void setup()
     SET_BIT(sensorStatus, STATUS_MAGNETOMETER_DETECTED);
     if(!mag.begin())
     {
-        Serial.println("ERROR: HMC5883 not detected!");
+        Serial.println("E");
         CLEAR_BIT(sensorStatus, STATUS_MAGNETOMETER_DETECTED);
     }
 
@@ -1349,7 +1530,7 @@ void setup()
     SET_BIT(sensorStatus, STATUS_ACCELEROMETER_DETECTED);
     if(!acc.begin())
     {
-        Serial.println("ERROR: ADXL345 not detected!");
+        Serial.println("E");
         CLEAR_BIT(sensorStatus, STATUS_ACCELEROMETER_DETECTED);
     }
 
@@ -1391,7 +1572,7 @@ void tick(uint16_t delta_millis)
         return;
     }
 
-    Serial.print(".");
+    //Serial.print(".");
 
     panicTimerCountdown();
 
