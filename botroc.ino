@@ -4,16 +4,14 @@
 #endif
 
 #include <Wire.h>
-#include <brxlib_sensors.h>        // *modified* Adafruit Unified Sensor library
-#include <brxlib_BMP085.h>      // BMP085 Barometer
-#include <brxlib_ADXL345.h>     // ADXL345 Accelerometer
-#include <brxlib_HMC5883.h>     // HMC5883 Magnetometer
+#include <Adafruit_Sensor.h>        // *modified* Adafruit Unified Sensor library
+#include <Adafruit_BMP085_U.h>      // BMP085 Barometer
+#include <Adafruit_ADXL345_U.h>     // ADXL345 Accelerometer
+#include <Adafruit_HMC5883_U.h>     // HMC5883 Magnetometer
 
 #define SET_BIT(a, b)   (a |= (0x1 << b))
 #define CLEAR_BIT(a, b) (a &= ~(0x1 << b))
 #define GET_BIT(a, b)   (a & (0x1 << b))
-
-#define SENSORS_32BIT                         1
 
 #define INTSRC_INTERRUPT                        2
 #define INTSRC_GYROMETER                        -1
@@ -46,12 +44,8 @@
 #define COMMAND_LINE_APPEND_THRESHOLD           ((COMMAND_LINE_BUFFER_SIZE / 4) * 3)
 
 #define SENSORS_BAROMETER_NUM_VALUES            16
-#define SENSORS_BAROMETER_SEALEVELHPA           SENSORS_PRESSURE_SEALEVELHPA
-#if SENSORS_32BIT
 #define SENSORS_BAROMETER_FACTOR_SCALING        100
-#else
-#define SENSORS_BAROMETER_FACTOR_SCALING        10
-#endif
+#define SENSORS_BAROMETER_SEALEVELHPA           (SENSORS_PRESSURE_SEALEVELHPA * SENSORS_BAROMETER_FACTOR_SCALING)
 
 #define SENSORS_ACCELEROMETER_NUM_VALUES        16
 #define SENSORS_ACCELEROMETER_FACTOR_SCALING    10
@@ -59,24 +53,14 @@
 #define SENSORS_MAGNETOMETER_NUM_VALUES         16
 #define SENSORS_MAGNETOMETER_FACTOR_SCALING     10
 
-#if SENSORS_32BIT
 typedef struct {
-    int32_t values[16];
-    int32_t prev_average;
-    int32_t average;
+    float values[16];
+    float prev_average;
+    float average;
     uint8_t filled_elements;
     uint8_t next_element_to_fill;
     uint16_t spare;
-} savg16_32;
-#else
-typedef struct {
-    int16_t values[16];
-    int16_t prev_average;
-    int16_t average;
-    uint8_t filled_elements;
-    uint8_t next_element_to_fill;
-} savg16_16;
-#endif // SENSORS_32BIT
+} savg16;
 
 typedef struct {
     uint32_t millis_previous_loop;
@@ -103,9 +87,9 @@ typedef struct {
     uint16_t panic_timeout;
 } sconfig;
 
-brxlib_BMP085 bmp = brxlib_BMP085(24680);
-brxlib_HMC5883 mag = brxlib_HMC5883(12345);
-brxlib_ADXL345 acc = brxlib_ADXL345(13579);
+Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(24680);
+Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
+Adafruit_ADXL345_Unified acc = Adafruit_ADXL345_Unified(13579);
 
 char cmdline[COMMAND_LINE_BUFFER_SIZE] = { 0 };
 uint8_t cmdlength = 0;
@@ -135,30 +119,18 @@ sconfig configuration = {
     3500 // panic_timeout
 };
 
-#if SENSORS_32BIT
-savg16_32 valsBarometer         = {};
-savg16_32 valsAccelerometer     = {};
-savg16_32 valsMagnetometer      = {};
-#else
-savg16_16 valsBarometer         = {};
-savg16_16 valsAccelerometer     = {};
-savg16_16 valsMagnetometer      = {};
-#endif
-
-/*
-uint32_t sensorBarometerValues[SENSORS_BAROMETER_NUM_VALUES] = { 0 };
-uint16_t sensorAccelerometerValues[SENSORS_ACCELEROMETER_NUM_VALUES] = { 0 };
-uint16_t sensorMagnetometerValues[SENSORS_MAGNETOMETER_NUM_VALUES] = { 0 };
-*/
+savg16 valsBarometer         = {};
+savg16 valsAccelerometer     = {};
+savg16 valsMagnetometer      = {};
 
 byte stateMachineState = STATE_GROUND_IDLE;
 
 // Set a default sea level (= 0m ASL) pressure
-int32_t seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA;
+float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA;
 
-uint16_t peakAltitudePressure = -1;
+float peakAltitudePressure = -1;
 
-int32_t launchPadHeight = 0;
+float launchPadHeight = 0;
 
 // How many consequitive positive barometer deltas to read in a row to say we're
 //   steadily falling
@@ -168,139 +140,7 @@ uint8_t barometerdeltastrikes = 3;
 uint8_t panicActivate = 0;
 uint16_t panicTimer = -1;
 
-uint32_t vlen3D(int32_t x, int32_t y, int32_t z)
-{
-    uint64_t sq = 0;
-    uint64_t sum = 0;
-
-    sq = (uint64_t)(x*x);
-    sum += sq;
-    sq = (uint64_t)(y*y);
-    sum += sq;
-    sq = (uint64_t)(z*z);
-    sum += sq;
-
-    return fsqrt64(sum);
-
-}
-
-uint32_t vlen2D(int32_t x, int32_t y)
-{
-    uint64_t sq = 0;
-    uint64_t sum = 0;
-
-    sq = (uint64_t)(x*x);
-    sum += sq;
-    sq = (uint64_t)(y*y);
-    sum += sq;
-
-    return fsqrt64(sum);
-
-}
-
-uint32_t fsqrt32(uint32_t arg)
-{
-    uint64_t sq = 0;
-    //uint32_t fg = (arg >> 1); // start with half the value
-    uint8_t i = 0;
-    uint32_t res = 0;
-    uint32_t temp = 0;
-    if(arg == 0)
-    {
-        return 0;
-    }
-
-    if(arg == 1)
-    {
-        return 1;
-    }
-
-    // Find the largest bit in fg
-    for(i = 31; !((arg >> 1) & (0x1 << i)) && (i > 0); i--)
-    {
-        // Do nothing
-    }
-
-    res = 0;
-    i++;
-
-    for(; i > 0; i--)
-    {
-        temp = res | (1 << (i-1));
-        
-        sq = temp*temp;
-        
-        if(sq > arg)
-        {
-            continue;
-        }
-
-        res = temp;
-
-        if(sq == arg)
-        {
-            // Perfect match
-            break;
-        }
-    }
-
-    return res;
-
-}
-
-uint32_t fsqrt64(uint64_t arg)
-{
-    uint64_t sq = 0;
-    //uint32_t fg = (arg >> 1); // start with half the value
-    uint8_t i = 0;
-    uint32_t res = 0;
-    uint64_t temp = 0;
-    if(arg == 0)
-    {
-        return 0;
-    }
-
-    if(arg == 1)
-    {
-        return 1;
-    }
-
-    // Find the largest bit in fg
-    for(i = 63; !((arg >> 1) & (0x1 << i)) && (i > 0); i--)
-    {
-        // Do nothing
-    }
-
-    res = 0;
-    i++;
-
-    for(; i > 0; i--)
-    {
-        temp = res | (1 << (i-1));
-        
-        sq = temp*temp;
-        
-        if(sq > arg)
-        {
-            continue;
-        }
-
-        res = temp;
-
-        if(sq == arg)
-        {
-            // Perfect match
-            break;
-        }
-    }
-
-    return res;
-
-}
-
-
-#if SENSORS_32BIT
-uint8_t append32(savg16_32 *vals, int32_t value)
+uint8_t append32(savg16 *vals, float value)
 {
     // 0 is an error value
     if(value == 0)
@@ -318,7 +158,18 @@ uint8_t append32(savg16_32 *vals, int32_t value)
     return vals->filled_elements;
 }
 
-int32_t favg32(savg16_32 *vals)
+float vlen3D(float x, float y, float z)
+{
+    return sqrt(
+        (x*x)
+        +
+        (y*y)
+        +
+        (z*z)
+    );
+}
+
+float favg32(savg16 *vals)
 {
     uint8_t i = 0;
     uint8_t j = 0;
@@ -349,7 +200,7 @@ int32_t favg32(savg16_32 *vals)
 
 }
 
-int32_t sensorBarometerReadValue()
+float sensorBarometerReadValue()
 {
     sensors_event_t event;
 
@@ -357,16 +208,16 @@ int32_t sensorBarometerReadValue()
 
     if(event.pressure)
     {
-        return (int32_t)event.pressure;
+        return event.pressure;
     }
     else
     {
         //Serial.println("Barometer event error");
-        return 0;
+        return 0.0;
     }
 }
 
-int32_t sensorAccelerometerReadValue()
+float sensorAccelerometerReadValue()
 {
     sensors_event_t event;
 
@@ -379,11 +230,11 @@ int32_t sensorAccelerometerReadValue()
     else
     {
         //Serial.println("Accelerometer event error");
-        return 0;
+        return 0.0;
     }
 }
 
-int32_t sensorMagnetometerReadValue()
+float sensorMagnetometerReadValue()
 {
     sensors_event_t event; 
     mag.getEvent(&event);
@@ -391,7 +242,6 @@ int32_t sensorMagnetometerReadValue()
     if(event.magnetic.x || event.magnetic.y || event.magnetic.z)
     {
         return vlen3D(event.magnetic.x, event.magnetic.y, event.magnetic.z);
-
     }
     else
     {
@@ -400,107 +250,6 @@ int32_t sensorMagnetometerReadValue()
     }
     
 }
-#else
-uint8_t append16(savg16_16 *vals, int16_t value)
-{
-    // 0 is an error value
-    if(value == 0)
-    {
-        return vals->filled_elements;
-    }
-
-    vals->values[vals->next_element_to_fill] = value;
-    vals->next_element_to_fill = (vals->next_element_to_fill + 1) & 0xF;
-    if(vals->filled_elements < 16)
-    {
-        vals->filled_elements++;
-    }
-
-    return vals->filled_elements;
-}
-
-int16_t favg16(savg16_16 *vals)
-{
-    uint8_t i = 0;
-    uint8_t j = 0;
-    int32_t sum = 0;
-    int32_t avg = 0;
-
-    // Catch the first call.
-    if(vals->filled_elements == 0)
-    {
-        return 0;
-    }
-
-    // Point to the first element:
-    j = (vals->next_element_to_fill + 16 - vals->filled_elements) & 0xF;
-
-    for(i = 0; i < vals->filled_elements; i++)
-    {
-        sum += vals->values[j];        
-        j = (j + 1) & 0xF;
-    }
-
-    avg = sum / vals->filled_elements;
-
-    vals->prev_average = vals->average;
-    vals->average = avg;
-
-    return avg;
-}
-
-int16_t sensorBarometerReadValue()
-{
-    sensors_event_t event;
-
-    bmp.getEvent(&event);
-
-    if(event.pressure)
-    {
-        return (int16_t)event.pressure;
-    }
-    else
-    {
-        //Serial.println("Barometer event error");
-        return 0;
-    }
-}
-
-int16_t sensorAccelerometerReadValue()
-{
-    sensors_event_t event;
-
-    acc.getEvent(&event);
-
-    if(event.acceleration.x || event.acceleration.y || event.acceleration.z)
-    {
-        return (int16_t)fsqrt32(((event.acceleration.x * event.acceleration.x)) + ((event.acceleration.y * event.acceleration.y)) + ((event.acceleration.z * event.acceleration.z)));
-    }
-    else
-    {
-        //Serial.println("Accelerometer event error");
-        return 0;
-    }
-}
-
-int16_t sensorMagnetometerReadValue()
-{
-    sensors_event_t event; 
-    mag.getEvent(&event);
-
-    if(event.magnetic.x || event.magnetic.y || event.magnetic.z)
-    {
-        return (int16_t)fsqrt32(((event.magnetic.x * event.magnetic.x)) + ((event.magnetic.y * event.magnetic.y)) + ((event.magnetic.z * event.magnetic.z)));
-
-    }
-    else
-    {
-        //Serial.println("Magnetometer event error");
-        return 0;
-    }
-    
-}
-#endif
 
 
 #if 0
@@ -805,10 +554,9 @@ uint8_t parseCommand(void)
                 Serial.println(sensorAccelerometerReadValue());
 
                 Serial.print("Current Accelerometer vector: ");
+                
                 sensors_event_t event; 
                 acc.getEvent(&event);
-
-                uint32_t x, y, z;
 
                 if(event.acceleration.x || event.acceleration.y || event.acceleration.z)
                 {
@@ -819,10 +567,7 @@ uint8_t parseCommand(void)
                     Serial.print(",  ");
                     Serial.print(event.acceleration.z);
                     Serial.print("] |v| = ");
-                    x = (uint32_t)event.acceleration.x;
-                    y = (uint32_t)event.acceleration.y;
-                    z = (uint32_t)event.acceleration.z;
-                    Serial.println(vlen3D(x, y, z));
+                    Serial.println(vlen3D(event.acceleration.x, event.acceleration.y, event.acceleration.z));
                 }
                 else
                 {
@@ -847,10 +592,7 @@ uint8_t parseCommand(void)
                     Serial.print(",  ");
                     Serial.print(event.magnetic.z);
                     Serial.print("] |v| = ");
-                    x = (uint32_t)event.magnetic.x;
-                    y = (uint32_t)event.magnetic.y;
-                    z = (uint32_t)event.magnetic.z;
-                    Serial.println(vlen3D(x, y, z));
+                    Serial.println(vlen3D(event.magnetic.x, event.magnetic.y, event.magnetic.z));
                 }
                 else
                 {
@@ -939,9 +681,9 @@ void displaySensorDetails(uint8_t sensorStatus)
         Serial.print  ("Sensor:       "); Serial.println(sensor.name);
         Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
         Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
-        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" Pa");
-        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" Pa");
-        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" Pa");  
+        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" hPa");
+        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" hPa");
+        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" hPa");  
         Serial.println("------------------------------------");
         Serial.println("");
         Serial.flush();
@@ -954,9 +696,9 @@ void displaySensorDetails(uint8_t sensorStatus)
         Serial.print  ("Sensor:       "); Serial.println(sensor.name);
         Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
         Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
-        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" nT");
-        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" nT");
-        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" nT");  
+        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" uT");
+        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" uT");
+        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" uT");  
         Serial.println("------------------------------------");
         Serial.println("");
         Serial.flush();
@@ -969,9 +711,9 @@ void displaySensorDetails(uint8_t sensorStatus)
         Serial.print  ("Sensor:       "); Serial.println(sensor.name);
         Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
         Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
-        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" mm/s^2");
-        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" mm/s^2");
-        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" mm/s^2");  
+        Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" m/s^2");
+        Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" m/s^2");
+        Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" m/s^2");  
         Serial.println("------------------------------------");
         Serial.println("");
         Serial.flush();
@@ -999,11 +741,7 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
         //Serial.println();
         //Serial.print(millis());
         //Serial.println(": Aavg");
-#if SENSORS_32BIT
         favg32(&valsAccelerometer);
-#else
-        favg16(&valsAccelerometer);
-#endif
     }
 
     if(delta_millis >= configuration.time_to_next_report_accelerometer)
@@ -1027,12 +765,12 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
             //Serial.print("Previous Average: ");
             Serial.print(valsAccelerometer.prev_average);
             Serial.print("\t");
-            //Serial.println(" mm/s^2");
+            //Serial.println(" m/s^2");
 
             //Serial.print("Average: ");
             Serial.print(valsAccelerometer.average);
             Serial.print("\t");
-            //Serial.println(" mm/s^2");
+            //Serial.println(" m/s^2");
 
             if(valsAccelerometer.prev_average > valsAccelerometer.average)
             {
@@ -1046,7 +784,7 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
             //Serial.print("Delta: ");
             Serial.print(diff);
             Serial.println();
-            //Serial.println(" mm/s^2");
+            //Serial.println(" m/s^2");
     }
     }
 
@@ -1065,11 +803,7 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force)
         //Serial.println();
         //Serial.print(millis());
         //Serial.println(": Aapd");
-#if SENSORS_32BIT
         append32(&valsAccelerometer, sensorAccelerometerReadValue());
-#else
-        append16(&valsAccelerometer, sensorAccelerometerReadValue());
-#endif
     }
 }
 
@@ -1093,11 +827,7 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
         //Serial.println();
         //Serial.print(millis());
         //Serial.println(": Mavg");
-#if SENSORS_32BIT
         favg32(&valsMagnetometer);
-#else
-        favg16(&valsMagnetometer);
-#endif
     }
 
     if(delta_millis >= configuration.time_to_next_report_magnetometer)
@@ -1122,12 +852,12 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
             //Serial.print("Previous Average: ");
             Serial.print(valsMagnetometer.prev_average);
             Serial.print("\t");
-            //Serial.println(" nT");
+            //Serial.println(" uT");
 
             //Serial.print("Average: ");
             Serial.print(valsMagnetometer.average);
             Serial.print("\t");
-            //Serial.println(" nT");
+            //Serial.println(" uT");
 
             if(valsMagnetometer.prev_average > valsMagnetometer.average)
             {
@@ -1141,7 +871,7 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
             //Serial.print("Delta: ");
             Serial.print(diff);
             Serial.println();
-            //Serial.println(" nT");
+            //Serial.println(" uT");
     }
     }
 
@@ -1160,11 +890,7 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force)
         //Serial.println();
         //Serial.print(millis());
         //Serial.println(": Mapd");
-#if SENSORS_32BIT
         append32(&valsMagnetometer, sensorMagnetometerReadValue());
-#else
-        append16(&valsMagnetometer, sensorMagnetometerReadValue());
-#endif
     }
 }
 
@@ -1188,11 +914,7 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
         //Serial.println();
         //Serial.print(millis());
         //Serial.println(": Bavg");
-#if SENSORS_32BIT
         favg32(&valsBarometer);
-#else
-        favg16(&valsBarometer);
-#endif
     }
 
     if(delta_millis >= configuration.time_to_next_report_barometer)
@@ -1217,12 +939,12 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
             //Serial.print("Previous Average: ");
             Serial.print(valsBarometer.prev_average);
             Serial.print("\t");
-            //Serial.println(" Pa");
+            //Serial.println(" hPa");
 
             //Serial.print("Average: ");
             Serial.print(valsBarometer.average);
             Serial.print("\t");
-            //Serial.println(" Pa");
+            //Serial.println(" hPa");
 
             if(valsBarometer.prev_average > valsBarometer.average)
             {
@@ -1236,7 +958,7 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
             //Serial.print("Delta: ");
             Serial.print(diff);
             Serial.println();
-            //Serial.println(" Pa");
+            //Serial.println(" hPa");
         }
     }
 
@@ -1255,11 +977,7 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force)
         //Serial.println();
         //Serial.print(millis());
         //Serial.println(": Bapd");
-#if SENSORS_32BIT
         append32(&valsBarometer, sensorBarometerReadValue());
-#else
-        append16(&valsBarometer, sensorBarometerReadValue());
-#endif
     }
 }
 
