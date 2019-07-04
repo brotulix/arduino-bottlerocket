@@ -771,6 +771,13 @@ Sketch uses 12336 bytes (40%) of program storage space. Maximum is 30720 bytes.
 Global variables use 1315 bytes (64%) of dynamic memory, leaving 733 bytes for local variables. Maximum is 2048 bytes.
 ```
 
+Switching back to Adafruit libraries and floats all around:
+```
+Sketch uses 15942 bytes (51%) of program storage space. Maximum is 30720 bytes.
+Global variables use 1567 bytes (76%) of dynamic memory, leaving 481 bytes for local variables. Maximum is 2048 bytes.
+```
+
+
 
 # Proposals
 Some proposals for extended features:
