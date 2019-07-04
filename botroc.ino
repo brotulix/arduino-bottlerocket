@@ -43,24 +43,17 @@
 #define COMMAND_LINE_BUFFER_SIZE                16
 #define COMMAND_LINE_APPEND_THRESHOLD           ((COMMAND_LINE_BUFFER_SIZE / 4) * 3)
 
-#define SENSORS_BAROMETER_NUM_VALUES            16
-#define SENSORS_BAROMETER_FACTOR_SCALING        100
-#define SENSORS_BAROMETER_SEALEVELHPA           (SENSORS_PRESSURE_SEALEVELHPA * SENSORS_BAROMETER_FACTOR_SCALING)
-
-#define SENSORS_ACCELEROMETER_NUM_VALUES        16
-#define SENSORS_ACCELEROMETER_FACTOR_SCALING    10
-
-#define SENSORS_MAGNETOMETER_NUM_VALUES         16
-#define SENSORS_MAGNETOMETER_FACTOR_SCALING     10
+#define SENSORS_NUM_VALUES                      4
+#define SENSORS_BAROMETER_SEALEVELHPA           SENSORS_PRESSURE_SEALEVELHPA
 
 typedef struct {
-    float values[16];
+    float values[SENSORS_NUM_VALUES];
     float prev_average;
     float average;
     uint8_t filled_elements;
     uint8_t next_element_to_fill;
     uint16_t spare;
-} savg16;
+} savg;
 
 typedef struct {
     uint32_t millis_previous_loop;
@@ -96,13 +89,13 @@ uint8_t cmdlength = 0;
 
 sconfig configuration = {
     0,   // millis_previous_loop
-    5,  // interval_refresh_accelerometer
+    10,  // interval_refresh_accelerometer
     50,  // interval_refresh_magnetometer
     25,  // interval_refresh_barometer
     25,  // interval_refresh_average_accelerometer
     250,  // interval_refresh_average_magnetometer
     100,  // interval_refresh_average_barometer
-    25,  // interval_report_accelerometer
+    50,  // interval_report_accelerometer
     250,  // interval_report_magnetometer
     100,  // interval_report_barometer
     250,  // limit_delta_barometer
@@ -119,9 +112,9 @@ sconfig configuration = {
     3500 // panic_timeout
 };
 
-savg16 valsBarometer         = {};
-savg16 valsAccelerometer     = {};
-savg16 valsMagnetometer      = {};
+savg valsBarometer         = {};
+savg valsAccelerometer     = {};
+savg valsMagnetometer      = {};
 
 byte stateMachineState = STATE_GROUND_IDLE;
 
@@ -140,20 +133,21 @@ uint8_t barometerdeltastrikes = 3;
 uint8_t panicActivate = 0;
 uint16_t panicTimer = -1;
 
-uint8_t append32(savg16 *vals, float value)
+uint8_t append32(savg *vals, float value)
 {
-    // 0 is an error value
-    if(value == 0)
-    {
-        return vals->filled_elements;
-    }
-
     vals->values[vals->next_element_to_fill] = value;
-    vals->next_element_to_fill = (vals->next_element_to_fill + 1) & 0xF;
-    if(vals->filled_elements < 16)
+    
+    vals->next_element_to_fill++;
+    if(vals->next_element_to_fill >= SENSORS_NUM_VALUES)
+    {
+        vals->next_element_to_fill -= SENSORS_NUM_VALUES;
+    }
+    
+    if(vals->filled_elements < SENSORS_NUM_VALUES)
     {
         vals->filled_elements++;
     }
+    
 
     return vals->filled_elements;
 }
@@ -169,12 +163,11 @@ float vlen3D(float x, float y, float z)
     );
 }
 
-float favg32(savg16 *vals)
+float favg32(savg *vals)
 {
     uint8_t i = 0;
-    uint8_t j = 0;
-    int64_t sum = 0;
-    int32_t avg = 0;
+    float sum = 0;
+    float avg = 0;
 
     // Catch the first call.
     if(vals->filled_elements == 0)
@@ -182,13 +175,9 @@ float favg32(savg16 *vals)
         return 0;
     }
 
-    // Point to the first element:
-    j = (vals->next_element_to_fill + 16 - vals->filled_elements) & 0xF;
-
     for(i = 0; i < vals->filled_elements; i++)
     {
-        sum += vals->values[j];        
-        j = (j + 1) & 0xF;
+        sum += vals->values[i];
     }
 
     avg = sum / vals->filled_elements;

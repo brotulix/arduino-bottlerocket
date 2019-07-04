@@ -192,13 +192,18 @@ Some of its highlights are:
 * Programmable data rate from 600 to 600k bps.
 * Supports several different modulations: 2- and 4-FSK, GFSK, MSK and OOK.
 
-Other modules using this chip have been found ([here's one example](http://www.yesyes.info/index.php/electronics/rf1100-232-rf-433mhz-transceiver-module/)). It is claimed to require 5V input, and that the sleep mode does not work.
+There is, however, an AtMega48 between us and the CC110L, possibly limiting its functionality somewhat. Other modules using this chip have been found ([here's one example](http://www.yesyes.info/index.php/electronics/rf1100-232-rf-433mhz-transceiver-module/)). It is claimed to require 5V input, and that the sleep mode does not work.
+
+The modules are *plug & play* at 9600 baud and 3.3V.
 
 ### Transfer rate
 The board supposedly accepts a simple UART RX/TX connection, making it easy to interface with the Arduino. The 433 MHz is claimed to be able to operate at a baud rates of 4800, 9600 or 19200, using one of 256 selectable channels.
 
 ### Range
-TBD.
+At 5V: TBD.
+
+At 3.3V: TBD.
+
 
 Antenna designs to be evaluated. Clover leaf or helical antennas may be feasible using thin wire taped to the inside of the payload capsule.
 
@@ -208,6 +213,18 @@ Ground control antenna could be a clover leaf or helical for stationary use, and
 
 ### Power draw
 TI's data sheet indicates that the CC110L alone draws about 30mA in +10dBm transmit mode. The board also has an AtMega48 chip.
+
+It can successfully transmit data with 3.3V VCC at minimum distance.
+
+At 3.3V, default settings and 9600 baud, transmitting `\n` or `28857   R       A       57.49   57.54   0\n` over RF yields practically the same results:
+* Nominally 20.6mA current draw (97mV/4.7Ohm)
+* The RF module changes current draw approximately 2.3ms after end of last character on serial line
+* 21,3mA (+0.7/+0.7mA) for 0.9ms
+* 37.9mA (+7.3/+6.6mA) for 3.4ms
+* 6,4 mA (-12.2/-31.5mA) for 3,7ms
+* 11,9mA (-8.7/+5.5mA) for 0.8ms
+
+
 
 
 
@@ -237,6 +254,8 @@ So in summary, we probably want to monitor at least three interrupt sources. May
 
 ### Power draw
 *Measure power draw*.
+
+
 
 ### Barometer
 The Adafruit library reads barometer pressure values as float. Using `uint16_t` instead may allow us to get enough precision and save some (global) memory by keeping the float value a local variable during sensor input only.
@@ -545,240 +564,6 @@ Area: <img src="doc/equations/Eq_017.svg" title="pi*((2.16cm)/2)^2) = 3.6644 cm^
 
 
 
-# Problems and issues during development
-## Generic libraries
-Started out using the generic sensor libraries from Adafruit for the sensor board, but we reached the limit of dynamic memory very fast:
-```
-Sketch uses 16472 bytes (53%) of program storage space. Maximum is 30720 bytes.
-Global variables use 1993 bytes (97%) of dynamic memory, leaving 55 bytes for local variables. Maximum is 2048 bytes.
-```
-
-Even switching to 16 bit storage for barometer values didn't help much:
-```
-Sketch uses 15768 bytes (51%) of program storage space. Maximum is 30720 bytes.
-Global variables use 1955 bytes (95%) of dynamic memory, leaving 93 bytes for local variables. Maximum is 2048 bytes.
-```
-
-A coarse count of global storage for flight computer's own variables indicates
-* 246 byte with 32 bit barometer values and 32 byte cmdlength
-* 230 byte with 32 bit barometer values and 16 byte cmdlength
-* 208 byte with 16 bit barometer values and 32 byte cmdlength
-* 192 byte with 16 bit barometer values and 16 byte cmdlength
-
-The `magsensor` example (HMC5883L magnetometer) on its own:
-```
-Sketch uses 7726 bytes (25%) of program storage space. Maximum is 30720 bytes.
-Global variables use 663 bytes (32%) of dynamic memory, leaving 1385 bytes for local variables. Maximum is 2048 bytes.
-```
-
-The `sensortest` example (ADXL345 accelerometer) on its own: 
-```
-Sketch uses 8200 bytes (26%) of program storage space. Maximum is 30720 bytes.
-Global variables use 821 bytes (40%) of dynamic memory, leaving 1227 bytes for local variables. Maximum is 2048 bytes.
-```
-
-The `sensorapi` example (BMP085 barometer) on its own:
-```
-Sketch uses 9542 bytes (31%) of program storage space. Maximum is 30720 bytes.
-Global variables use 760 bytes (37%) of dynamic memory, leaving 1288 bytes for local variables. Maximum is 2048 bytes.
-```
-
-All three simply combined:
-```
-Sketch uses 13258 bytes (43%) of program storage space. Maximum is 30720 bytes.
-Global variables use 1084 bytes (52%) of dynamic memory, leaving 964 bytes for local variables. Maximum is 2048 bytes.
-```
-
-Changing from `-Os` to `-O3` yields:
-```
-Sketch uses 19622 bytes (63%) of program storage space. Maximum is 30720 bytes.
-Global variables use 1084 bytes (52%) of dynamic memory, leaving 964 bytes for local variables. Maximum is 2048 bytes.
-```
-
-Printing some sizes:
-
-```
-Size of Adafruit_HMC5883_Unified: 25
-Size of Adafruit_BMP085_Unified: 7
-Size of Adafruit_ADXL345_Unified: 15
-Size of sensors_event_t: 36
-Size of 'sensor_t': 40
-```
-
-Copied and rewrote the Adafruit_Unified_Sensor API to drop float, and the same with their BMP085 driver. This is the result of its `sensorapi` example:
-```
-Sketch uses 6162 bytes (20%) of program storage space. Maximum is 30720 bytes.
-Global variables use 689 bytes (33%) of dynamic memory, leaving 1359 bytes for local variables. Maximum is 2048 bytes.
-```
-
-9542-6162 = 3380 byte of program memory saved. 760 - 689 = 71 byte of dynamic memory saved. The example even works:
-```
-Pressure:    100751 Pa
-Temperature: 262 C
-Pressure:    100750 Pa
-Temperature: 262 C
-Pressure:    100747 Pa
-Temperature: 262 C
-Pressure:    102222 Pa
-Temperature: 263 C
-Pressure:    103799 Pa
-Temperature: 279 C
-Pressure:    100023 Pa
-Temperature: 289 C
-Pressure:    100309 Pa
-Temperature: 278 C
-Pressure:    100494 Pa
-Temperature: 271 C
-Pressure:    100589 Pa
-Temperature: 268 C
-Pressure:    100650 Pa
-Temperature: 266 C
-Pressure:    100687 Pa
-Temperature: 264 C
-```
-
-For the ADXL345, this is the result:
-```
-Sketch uses 6634 bytes (21%) of program storage space. Maximum is 30720 bytes.
-Global variables use 811 bytes (39%) of dynamic memory, leaving 1237 bytes for local variables. Maximum is 2048 bytes.
-```
-
-8200 - 6812 = 1388 bytes of program memory saved. 821 - 811 = 10 byte of dynamic memory saved.
-
-Didn't yield quite the expected readings with the modified library:
-```
-Accelerometer Test
-
-------------------------------------
-Sensor:       ADXL345
-Driver Ver:   1
-Unique ID:    12345
-Max Value:    -156906 mm/s^2
-Min Value:    156906 mm/s^2
-Resolution:   39 mm/s^2
-------------------------------------
-
-Data Rate:    100  Hz
-Range:         +/- 16  g
-
-X: -5060  Y: -11258  Z: 56174  mm/s^2
-X: -5060  Y: -11219  Z: 56135  mm/s^2
-X: -5021  Y: -11219  Z: 56096  mm/s^2
-X: -5021  Y: -11297  Z: 56174  mm/s^2
-X: -5060  Y: -11258  Z: 56135  mm/s^2
-```
-
-But neither did the stock Adafruit one:
-```
-Accelerometer Test
-
-------------------------------------
-Sensor:       ADXL345
-Driver Ver:   1
-Unique ID:    12345
-Max Value:    -156.91 m/s^2
-Min Value:    156.91 m/s^2
-Resolution:   0.04 m/s^2
-------------------------------------
-
-Data Rate:    100  Hz
-Range:         +/- 16  g
-
-X: -5.22  Y: -11.26  Z: 56.13  m/s^2
-X: -5.14  Y: -11.34  Z: 56.17  m/s^2
-X: -5.22  Y: -11.34  Z: 56.13  m/s^2
-X: -5.26  Y: -11.26  Z: 56.17  m/s^2
-X: -5.26  Y: -11.26  Z: 56.21  m/s^2
-```
-
-So whatever is wrong is not our fault -- at least not our code!
-
-The HMC5883 is no worse:
-```
-Sketch uses 5696 bytes (18%) of program storage space. Maximum is 30720 bytes.
-Global variables use 631 bytes (30%) of dynamic memory, leaving 1417 bytes for local variables. Maximum is 2048 bytes.
-```
-7726 - 5696 = 2030 bytes of program memory saved. 663 - 631 = 32 byte of dynamic memory saved.
-
-```
-HMC5883 Magnetometer Test
-
-------------------------------------
-Sensor:       HMC5883
-Driver Ver:   1
-Unique ID:    12345
-Max Value:    800000 nT
-Min Value:    -800000 nT
-Resolution:   20 nT
-------------------------------------
-
-X: -18  Y: -24  Z: -83  nT
-X: -18  Y: -24  Z: -83  nT
-X: -18  Y: -24  Z: -83  nT
-X: -18  Y: -24  Z: -83  nT
-X: -18  Y: -24  Z: -83  nT
-```
-
-Approaching the sensor with a magnet:
-```
-X: -18  Y: -24  Z: -83  nT
-X: -18  Y: -24  Z: -83  nT
-X: -18  Y: -24  Z: -83  nT
-X: -51  Y: 109  Z: -161  nT
-X: 21  Y: 24  Z: -55  nT
-X: 25  Y: 33  Z: -58  nT
-X: 19  Y: 104  Z: -85  nT
-X: -19  Y: 164  Z: -110  nT
-X: -29  Y: 88  Z: -91  nT
-X: -16  Y: -26  Z: -76  nT
-X: -15  Y: -26  Z: -76  nT
-X: -15  Y: -26  Z: -76  nT
-```
-
-Compared to the Adafruit driver:
-```
-HMC5883 Magnetometer Test
-
-------------------------------------
-Sensor:       HMC5883
-Driver Ver:   1
-Unique ID:    12345
-Max Value:    800.00 uT
-Min Value:    -800.00 uT
-Resolution:   0.20 uT
-------------------------------------
-
-X: -20.00  Y: -24.18  Z: -76.63  uT
-X: -20.27  Y: -24.09  Z: -77.04  uT
-X: -20.27  Y: -24.09  Z: -76.53  uT
-X: -20.45  Y: -23.91  Z: -76.63  uT
-X: -20.18  Y: -24.18  Z: -76.84  uT
-```
-
-Looks good!
-
-Except, even with the smaller libraries, we've only gained 4 bytes of dynamic memory:
-```
-Sketch uses 14036 bytes (45%) of program storage space. Maximum is 30720 bytes.
-Global variables use 1951 bytes (95%) of dynamic memory, leaving 97 bytes for local variables. Maximum is 2048 bytes.
-```
-
-At least it's 15768-14036 = 1732 byte smaller program code...
-
-Removed a ton of `Serial.print[ln]()` calls, and now we're down to:
-```
-Sketch uses 12336 bytes (40%) of program storage space. Maximum is 30720 bytes.
-Global variables use 1315 bytes (64%) of dynamic memory, leaving 733 bytes for local variables. Maximum is 2048 bytes.
-```
-
-Switching back to Adafruit libraries and floats all around:
-```
-Sketch uses 15942 bytes (51%) of program storage space. Maximum is 30720 bytes.
-Global variables use 1567 bytes (76%) of dynamic memory, leaving 481 bytes for local variables. Maximum is 2048 bytes.
-```
-
-
-
 # Proposals
 Some proposals for extended features:
 * Grease the release mechanism for a potentially easier launch triggering.
@@ -787,5 +572,3 @@ Some proposals for extended features:
 * Compressed air parachute deployment using an inflated water balloon and solenoid valve. Con: Balloon takes up space, solenoid is probably heavy.
 * In case of noisy UART over 433 MHz: Add a few characters that signals start of a command, eg. `<SP><SP><SP>S6<LF>` to enter `STATE_GROUND_RECOVERY`.
 * *More to come*...
-
-
