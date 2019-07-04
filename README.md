@@ -765,6 +765,12 @@ Global variables use 1951 bytes (95%) of dynamic memory, leaving 97 bytes for lo
 
 At least it's 15768-14036 = 1732 byte smaller program code...
 
+Removed a ton of `Serial.print[ln]()` calls, and now we're down to:
+```
+Sketch uses 12336 bytes (40%) of program storage space. Maximum is 30720 bytes.
+Global variables use 1315 bytes (64%) of dynamic memory, leaving 733 bytes for local variables. Maximum is 2048 bytes.
+```
+
 
 # Proposals
 Some proposals for extended features:
