@@ -99,10 +99,10 @@ uint8_t cmdlength = 0;
 
 sconfig configuration = {
     0,      // millis_previous_loop
-    10,     // interval_refresh_accelerometer
+    1,     // interval_refresh_accelerometer
     50,     // interval_refresh_magnetometer
     25,     // interval_refresh_barometer
-    25,     // interval_refresh_average_accelerometer
+    15,     // interval_refresh_average_accelerometer
     500,    // interval_refresh_average_magnetometer
     100,    // interval_refresh_average_barometer
     50,     // interval_report_accelerometer
@@ -110,7 +110,7 @@ sconfig configuration = {
     100,    // interval_report_barometer
     30,     // limit_delta_barometer
     250,    // limit_delta_accelerometer
-    250,    // limit_delta_magnetometer
+    175,    // limit_delta_magnetometer
     0,      // time_to_next_update_accelerometer
     0,      // time_to_next_update_magnetometer
     0,      // time_to_next_update_barometer
@@ -1153,18 +1153,25 @@ void stateMachine(uint16_t delta_millis)
                 peakAltitudePressure = valsBarometer.average;
             }
 
+            diff = 0;
+            
             // count down positive barometer deltas, indicating a decreasing height
             // A single positive value could perhaps simply be from pressure oscillations inside the payload capsule due to turbulence during launch, so we could get a premature deployment of parachute?
             if(valsBarometer.prev_average < valsBarometer.average)
             {
                 // Decreasing
-                diff = abs((valsBarometer.prev_average - valsBarometer.average)*100.0);
+                diff = ((valsBarometer.average - valsBarometer.prev_average)*100.0);
 
                 // Decreasing by enough?
                 if(diff > configuration.limit_delta_barometer)
                 {
                     Serial.print(millis());
-                    Serial.println(": BAROMETER MAGNITUDE ABOVE THRESHOLD");
+                    Serial.print(": BAROMETER MAGNITUDE ABOVE THRESHOLD (");
+                    Serial.print(diff);
+                    Serial.print(">");
+                    Serial.print(configuration.limit_delta_barometer);
+                    Serial.println(")");
+
                     barometerdeltastrikes--;
                 }
             }
