@@ -57,8 +57,6 @@ Earlier tests have shown that magnetic arming is possible by detecting changes i
 
 
 
-
-
 # System overview
 The launch control/monitoring system likely consists of two parts: The launched vessel, and a ground station.
 
@@ -199,6 +197,8 @@ The modules are *plug & play* at 9600 baud and 3.3V.
 ### Transfer rate
 The board supposedly accepts a simple UART RX/TX connection, making it easy to interface with the Arduino. The 433 MHz is claimed to be able to operate at a baud rates of 4800, 9600 or 19200, using one of 256 selectable channels.
 
+
+
 ### Range
 At 5V: TBD.
 
@@ -224,7 +224,11 @@ At 3.3V, default settings and 9600 baud, transmitting `\n` or `28857   R       A
 * 6,4 mA (-12.2/-31.5mA) for 3,7ms
 * 11,9mA (-8.7/+5.5mA) for 0.8ms
 
-
+Setting up the RF module for different power levels, still at 3.3V, yields the following results, average peak-peak measured over 4.7 Ohm resistor for 30 transmissions of `B` at 1 second interval.
+* Level `0x00`: 80.8mV
+* Level `0x05`: 95.9mV
+* Level `0x07`: 136mV
+* Any other value: 166mV ~= 10dBm
 
 
 
@@ -460,6 +464,11 @@ Various electronic components intended for inclusion:
 * Latest rocket body (CCCP, no fuel): 117.5 g
 * Coca-Cola 1.75L bottle (empty): 44.1 g
 * Solo bottle payload capsule (cut-off): 23.1 g
+* A full 30L bio-degradable bag: 10 g
+* Parachute launch tube (K-rør Ø20mm L75mm): 9.1 g
+* Parachute deployment mechanism (excl. servo): approx 50 g.
+
+
 
 ## Suggested payload weight estimate:
 *  10 g - Arduino + Barometer
@@ -467,10 +476,27 @@ Various electronic components intended for inclusion:
 *  10 g - Audiovisual beacon
 *  15 g - Battery
 *  15 g - Servo
-*  15 g - Parachutes
+*  15 g - Parachute(s)
 * 150 g - Rocket body with payload capsule
 *  30 g - Various mechanical assemblages (eg. parachute deployment)
 = 250 g Total
+
+
+
+# Mechanical
+## Parachute deployment
+### Prior experience
+An earlier system similar to (insert video URL) was tested. It seemed to work fairly well, but during flight testing, the parachute lodged itself between the parachute hatch and the parachute eject spring.
+
+### Proposed mechanism
+A mechanism made from a compressible spring and a tube containing the parachute to be deployed out through the side of the payload capsule. Strings attached to the front of the spring (towards parachute) will hook onto the arm of a servo motor, holding it coiled until deploymet.
+
+### Prototype
+A quick prototype was attempted, using some Kevlar string, a piece of polycarbonate, a spring and some screws and washers. It proved to be difficult to keep the spring coiled neatly, even inside a tube, and the strings easily got snagged. However, in the search for a suitable spring, a vacuum pump for removal of solder was disassembled; it has a very neat release mechanism and a perfectly sized spring.
+
+Two vacuum pumps and some additional materials (Ø5mm brass rod) were acquired, and some hours later a working prototype release mechanism had been conceived.
+
+A 30 liter bio-degradable waste bag just barely fits inside a 75mm long piece of OD 20mm *"*K-rør"* (ID 17mm). The spring easily compresses to about half this length, so approximately 45mm is taken as the latching point for the first prototype.
 
 
 
