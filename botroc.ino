@@ -25,6 +25,7 @@
 #define BUZZER_PIN                              8
 #define PARACHUTE_SERVO_PIN                     9
 #define BLINKER_PIN                             10
+#define SERVO_ENABLE_PIN                        11
 #define I2C_SDA                                 18
 #define I2C_SCL                                 19
 
@@ -1160,14 +1161,19 @@ void releaseTheKrakenshoot()
     // Release the parachute by applying a different angle to the servo
     // or applying power to a motor
     // or something...
+    digitalWrite(SERVO_ENABLE_PIN, HIGH);
+
     parachuteReleaseServo.write(configuration.servo_release);
     delay(250);
+    digitalWrite(SERVO_ENABLE_PIN, LOW);
 }
 
 void resetParachute()
 {
+    digitalWrite(SERVO_ENABLE_PIN, HIGH);
     parachuteReleaseServo.write(configuration.servo_safe);
     delay(250);
+    digitalWrite(SERVO_ENABLE_PIN, LOW);
 }
 
 
@@ -1543,6 +1549,7 @@ void setup()
 
     pinMode(BUZZER_PIN, OUTPUT);
     pinMode(PARACHUTE_SERVO_PIN, OUTPUT);
+    pinMode(SERVO_ENABLE_PIN, OUTPUT);
     pinMode(BLINKER_PIN, OUTPUT);
 
     delay(1000);
@@ -1553,7 +1560,8 @@ void setup()
 
     //Serial.println("Safe position...");
 
-    parachuteReleaseServo.write(configuration.servo_safe);
+    resetParachute();
+    //parachuteReleaseServo.write(configuration.servo_safe);
 
     delay(1000);
 
