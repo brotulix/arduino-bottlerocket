@@ -22,12 +22,14 @@
 #define INTSRC_ACCELEROMETER                    6
 #define INTSRC_MAGNETOMETER                     7
 */
+#define SERVO_ENABLE_PIN                        7
 #define BUZZER_PIN                              8
 #define PARACHUTE_SERVO_PIN                     9
 #define BLINKER_PIN                             10
-#define SERVO_ENABLE_PIN                        11
 #define I2C_SDA                                 18
 #define I2C_SCL                                 19
+#define BATTERY_VOLTAGE_PIN                     PIN_A2
+
 
 #define STATUS_BAROMETER_DETECTED               0
 #define STATUS_ACCELEROMETER_DETECTED           1
@@ -65,26 +67,29 @@ typedef struct {
 typedef struct {
     uint32_t millis_previous_loop;
     uint16_t interval_read_accelerometer;
-    uint16_t interval_read_magnetometer;
     uint16_t interval_read_barometer;
+    uint16_t interval_read_magnetometer;
     uint16_t interval_average_accelerometer;
-    uint16_t interval_average_magnetometer;
     uint16_t interval_average_barometer;
+    uint16_t interval_average_magnetometer;
     uint16_t interval_print_accelerometer;
-    uint16_t interval_print_magnetometer;
     uint16_t interval_print_barometer;
-    uint16_t limit_delta_barometer;
+    uint16_t interval_print_magnetometer;
+    uint16_t interval_check_battery;
     uint16_t limit_delta_accelerometer;
+    uint16_t limit_delta_barometer;
     uint16_t limit_delta_magnetometer;
+    uint16_t limit_battery_voltage;
     uint16_t time_to_next_update_accelerometer;
-    uint16_t time_to_next_update_magnetometer;
     uint16_t time_to_next_update_barometer;
+    uint16_t time_to_next_update_magnetometer;
     uint16_t time_to_next_update_average_accelerometer;
-    uint16_t time_to_next_update_average_magnetometer;
     uint16_t time_to_next_update_average_barometer;
+    uint16_t time_to_next_update_average_magnetometer;
     uint16_t time_to_next_report_accelerometer;
-    uint16_t time_to_next_report_magnetometer;
     uint16_t time_to_next_report_barometer;
+    uint16_t time_to_next_report_magnetometer;
+    uint16_t time_to_next_read_battery_voltage;
     uint16_t panic_timeout_outbound;
     uint16_t panic_timeout_inbound;
     uint16_t buzzer_frequency;
@@ -103,27 +108,30 @@ uint8_t cmdlength = 0;
 
 sconfig configuration = {
     0,      // millis_previous_loop
-    1,     // interval_read_accelerometer
-    50,     // interval_read_magnetometer
+    1,      // interval_read_accelerometer
     25,     // interval_read_barometer
+    50,     // interval_read_magnetometer
     15,     // interval_average_accelerometer
-    500,    // interval_average_magnetometer
     100,    // interval_average_barometer
+    500,    // interval_average_magnetometer
     50,     // interval_print_accelerometer
-    500,    // interval_print_magnetometer
     100,    // interval_print_barometer
-    30,     // limit_delta_barometer
+    500,    // interval_print_magnetometer
+    5000,   // interval_check_battery
     250,    // limit_delta_accelerometer
+    30,     // limit_delta_barometer
     175,    // limit_delta_magnetometer
+    730,    // limit_battery_voltage
     0,      // time_to_next_update_accelerometer
-    0,      // time_to_next_update_magnetometer
     0,      // time_to_next_update_barometer
+    0,      // time_to_next_update_magnetometer
     0,      // time_to_next_update_average_accelerometer
-    0,      // time_to_next_update_average_magnetometer
     0,      // time_to_next_update_average_barometer
+    0,      // time_to_next_update_average_magnetometer
     0,      // time_to_next_report_accelerometer
-    0,      // time_to_next_report_magnetometer
     0,      // time_to_next_report_barometer
+    0,      // time_to_next_report_magnetometer
+    0,      // time_to_next_read_battery_voltage
     3500,   // panic_timeout_outbound
     3000,   // panic_timeout_inbound
     4000,    // buzzer_frequency
@@ -316,11 +324,11 @@ uint8_t parseCommandConfiguration(uint8_t j, uint8_t len)
         //Serial.print("interval_read_accelerometer: ");
         Serial.println(configuration.interval_read_accelerometer);
         
-        //Serial.print("interval_read_magnetometer: ");
-        Serial.println(configuration.interval_read_magnetometer);
-        
         //Serial.print("interval_read_barometer: ");
         Serial.println(configuration.interval_read_barometer);
+        
+        //Serial.print("interval_read_magnetometer: ");
+        Serial.println(configuration.interval_read_magnetometer);
         
         //Serial.print("interval_average_accelerometer: ");
         Serial.println(configuration.interval_average_accelerometer);
@@ -337,8 +345,11 @@ uint8_t parseCommandConfiguration(uint8_t j, uint8_t len)
         //Serial.print("interval_print_barometer: ");
         Serial.println(configuration.interval_print_barometer);
         
-        //Serial.print("interval_print_magnetometer: ");
+        //Serial.print("interval_print_barometer: ");
         Serial.println(configuration.interval_print_magnetometer);
+        
+        //Serial.print("panic_timeout_outbound: ");
+        Serial.println(configuration.interval_check_battery);
         
         //Serial.print("limit_delta_accelerometer: ");
         Serial.println(configuration.limit_delta_accelerometer);
@@ -350,6 +361,9 @@ uint8_t parseCommandConfiguration(uint8_t j, uint8_t len)
         Serial.println(configuration.limit_delta_magnetometer);
         
         //Serial.print("panic_timeout_outbound: ");
+        Serial.println(configuration.limit_battery_voltage);
+
+        //Serial.print("panic_timeout_outbound: ");
         Serial.println(configuration.panic_timeout_outbound);
         
         //Serial.print("panic_timeout_inbound: ");
@@ -358,11 +372,11 @@ uint8_t parseCommandConfiguration(uint8_t j, uint8_t len)
         //Serial.print("buzzer_frequency: ");
         Serial.println(configuration.buzzer_frequency);
         
-        //Serial.print("servo_release: ");
-        Serial.println(configuration.servo_release);
-        
         //Serial.print("servo_safe: ");
         Serial.println(configuration.servo_safe);
+        
+        //Serial.print("servo_release: ");
+        Serial.println(configuration.servo_release);
         
         return j;
     }
@@ -503,6 +517,17 @@ uint8_t parseCommandConfiguration(uint8_t j, uint8_t len)
                     }
                     break;
                 }
+                
+                case 'V': // Battery Voltage
+                {
+                    i = getInt16(&val, j, len);
+                    if(i)
+                    {
+                        configuration.interval_check_battery = val;
+                    }
+                    return i;
+                    break;
+                }
 
                 default:
                     break;
@@ -546,6 +571,17 @@ uint8_t parseCommandConfiguration(uint8_t j, uint8_t len)
                     if(i)
                     {
                         configuration.limit_delta_magnetometer = val;
+                    }
+                    return i;
+                    break;
+                }
+
+                case 'V': // Battery Voltage
+                {
+                    i = getInt16(&val, j, len);
+                    if(i)
+                    {
+                        configuration.limit_battery_voltage = val;
                     }
                     return i;
                     break;
@@ -1121,6 +1157,46 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
     }
 }
 
+void doBatteryActions(uint16_t delta_millis)
+{
+    uint8_t update = 0;
+    uint16_t voltage = 0;
+    
+    if(delta_millis >= configuration.time_to_next_read_battery_voltage)
+    {
+        update = 1;
+        configuration.time_to_next_read_battery_voltage = configuration.interval_check_battery;
+    }
+    else {
+        update = 0;
+        configuration.time_to_next_read_battery_voltage -= delta_millis;
+    }
+
+    if(update)
+    {
+        voltage = readBatteryVoltage();
+        Serial.print(millis());
+        Serial.print("\tR\tV\t");
+        Serial.print(voltage);
+
+        if(voltage < configuration.limit_battery_voltage)
+        {
+            tone(BUZZER_PIN, 440, configuration.interval_check_battery/2);
+            Serial.print("\tBAT VOLT WARN");
+        }
+        Serial.println();
+    }
+
+
+}
+
+uint16_t readBatteryVoltage()
+{
+    uint16_t adval = 0;
+    adval = analogRead(BATTERY_VOLTAGE_PIN);
+    return adval;
+}
+
 void panicTimerCountdown(uint16_t delta)
 {
     if(!panicActivate)
@@ -1269,6 +1345,7 @@ void setState(uint8_t newState)
 void stateMachine(uint16_t delta_millis)
 {
     int32_t diff = 0;
+    doBatteryActions(delta_millis);
     switch(stateMachineState)
     {
         case STATE_GROUND_IDLE_ON_PAD:
