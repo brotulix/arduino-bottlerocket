@@ -53,7 +53,7 @@
 #define COMMAND_LINE_BUFFER_SIZE                16
 #define COMMAND_LINE_APPEND_THRESHOLD           ((COMMAND_LINE_BUFFER_SIZE / 4) * 3)
 
-#define SENSORS_NUM_VALUES                      4
+#define SENSORS_NUM_VALUES                      8
 
 typedef struct {
     float values[SENSORS_NUM_VALUES];
@@ -1590,7 +1590,6 @@ void stateMachine(uint16_t delta_millis)
     }
 }
 
-
 /** Check for bytes in UART receive buffer, and append them to our own command
  *    buffer, or at least as many as there is room for at the moment.
  */
@@ -1715,6 +1714,8 @@ void setup()
         CLEAR_BIT(sensorStatus, STATUS_BAROMETER_DETECTED);
     }
 
+    // nothing to set
+
     //Serial.println("Magnetometer...");
     SET_BIT(sensorStatus, STATUS_MAGNETOMETER_DETECTED);
     if(!mag.begin())
@@ -1723,6 +1724,8 @@ void setup()
         CLEAR_BIT(sensorStatus, STATUS_MAGNETOMETER_DETECTED);
     }
 
+    //mag.setMagGain();
+
     //Serial.println("Accelerometer...");
     SET_BIT(sensorStatus, STATUS_ACCELEROMETER_DETECTED);
     if(!acc.begin())
@@ -1730,6 +1733,9 @@ void setup()
         Serial.println("AE");
         CLEAR_BIT(sensorStatus, STATUS_ACCELEROMETER_DETECTED);
     }
+
+    acc.setDataRate(ADXL345_DATARATE_800_HZ);
+    acc.setRange(ADXL345_RANGE_16_G);
 
     // At least one sensor was initialized...
     displaySensorDetails(sensorStatus);
