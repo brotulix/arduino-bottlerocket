@@ -53,7 +53,7 @@
 #define COMMAND_LINE_BUFFER_SIZE                16
 #define COMMAND_LINE_APPEND_THRESHOLD           ((COMMAND_LINE_BUFFER_SIZE / 4) * 3)
 
-#define SENSORS_NUM_VALUES                      8
+#define SENSORS_NUM_VALUES                      4
 
 typedef struct {
     float values[SENSORS_NUM_VALUES];
@@ -108,19 +108,19 @@ uint8_t cmdlength = 0;
 
 sconfig configuration = {
     0,      // millis_previous_loop
-    1,      // interval_read_accelerometer
-    25,     // interval_read_barometer
+    2,      // interval_read_accelerometer
+    50,     // interval_read_barometer
     50,     // interval_read_magnetometer
-    15,     // interval_average_accelerometer
-    100,    // interval_average_barometer
+    10,     // interval_average_accelerometer
+    50,     // interval_average_barometer
     500,    // interval_average_magnetometer
-    50,     // interval_print_accelerometer
-    100,    // interval_print_barometer
+    10,     // interval_print_accelerometer
+    50,     // interval_print_barometer
     500,    // interval_print_magnetometer
     5000,   // interval_check_battery
     250,    // limit_delta_accelerometer
     30,     // limit_delta_barometer
-    175,    // limit_delta_magnetometer
+    60,     // limit_delta_magnetometer
     730,    // limit_battery_voltage
     0,      // time_to_next_update_accelerometer
     0,      // time_to_next_update_barometer
@@ -145,7 +145,11 @@ savg valsMagnetometer      = {};
 
 byte stateMachineState = STATE_GROUND_IDLE;
 
-float peakAltitudePressure = -1;
+float peakAltitudePressure = -1.0;
+float groundStationPressure = -1.0;
+float unarmedMagnetometerMagnitude = -1.0;
+float groundStationAccelerationMagnitude = -1.0;
+float peakLaunchAverageAccelerationMagnitude = -1.0;
 
 // How many consequitive positive barometer deltas to read in a row to say we're
 //   steadily falling
@@ -154,6 +158,16 @@ uint8_t barometerdeltastrikes = 3;
 
 uint8_t panicActivate = 0;
 int32_t panicTimer = -1;
+
+void clearCommandBuffer()
+{
+    uint8_t cmdlength = 0;
+    //Serial.println("Clearing command buffer...");
+    for(cmdlength = COMMAND_LINE_BUFFER_SIZE; cmdlength > 0; cmdlength--)
+    {
+        cmdline[cmdlength-1] = '\0';
+    }
+}
 
 uint8_t append32(savg *vals, float value)
 {
@@ -785,6 +799,7 @@ uint8_t parseCommand(void)
                     j = parseCommandConfiguration(j, i);
                     if(j < i)
                     {
+                        clearCommandBuffer();
                         //Serial.println("There were leftover characters!");
                     }
                     return j;
@@ -904,22 +919,22 @@ void displaySensorDetails(uint8_t sensorStatus)
     }
 }
 
-void doAccelerometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
+uint8_t doAccelerometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
 {
     uint8_t update = 0;
     int32_t diff = 0;
 
     if(delta_millis >= configuration.time_to_next_update_average_accelerometer)
     {
-        update = 1;
+        SET_BIT(update, STATUS_UPDATE_AVERAGE);
         configuration.time_to_next_update_average_accelerometer = configuration.interval_average_accelerometer;
     }
     else {
-        update = 0;
+        CLEAR_BIT(update, STATUS_UPDATE_AVERAGE);
         configuration.time_to_next_update_average_accelerometer -= delta_millis;
     }
 
-    if(update | GET_BIT(force, STATUS_UPDATE_AVERAGE))
+    if(GET_BIT(update, STATUS_UPDATE_AVERAGE) || GET_BIT(force, STATUS_UPDATE_AVERAGE))
     {
         //Serial.println();
         //Serial.print(millis());
@@ -929,15 +944,16 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force, uint8_t report
 
     if(delta_millis >= configuration.time_to_next_report_accelerometer)
     {
-        update = 1;
+        SET_BIT(update, STATUS_REPORT);
         configuration.time_to_next_report_accelerometer = configuration.interval_print_accelerometer;
     }
-    else {
-        update = 0;
+    else
+    {
+        CLEAR_BIT(update, STATUS_REPORT);
         configuration.time_to_next_report_accelerometer -= delta_millis;
     }
 
-    if((report && update) || GET_BIT(force, STATUS_REPORT))
+    if((report && GET_BIT(update, STATUS_REPORT)) || GET_BIT(force, STATUS_REPORT))
     {
         if(valsAccelerometer.filled_elements)
         {
@@ -946,8 +962,8 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force, uint8_t report
             Serial.print("\tR\tA\t");
 
             //Serial.print("Previous Average: ");
-            Serial.print(valsAccelerometer.prev_average);
-            Serial.print("\t");
+            //Serial.print(valsAccelerometer.prev_average);
+            //Serial.print("\t");
             //Serial.println(" m/s^2");
 
             //Serial.print("Average: ");
@@ -973,39 +989,41 @@ void doAccelerometerActions(uint16_t delta_millis, uint8_t force, uint8_t report
 
     if(delta_millis >= configuration.time_to_next_update_accelerometer)
     {
-        update = 1;
+        SET_BIT(update, STATUS_UPDATE);
         configuration.time_to_next_update_accelerometer = configuration.interval_read_accelerometer;
     }
     else {
-        update = 0;
+        CLEAR_BIT(update, STATUS_UPDATE);
         configuration.time_to_next_update_accelerometer -= delta_millis;
     }
 
-    if(update | GET_BIT(force, STATUS_UPDATE))
+    if(GET_BIT(update, STATUS_UPDATE) || GET_BIT(force, STATUS_UPDATE))
     {
         //Serial.println();
         //Serial.print(millis());
         //Serial.println(": Aapd");
         append32(&valsAccelerometer, sensorAccelerometerReadValue(0));
     }
+
+    return (update | force);
 }
 
-void doMagnetometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
+uint8_t doMagnetometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
 {
     uint8_t update = 0;
     int32_t diff = 0;
 
     if(delta_millis >= configuration.time_to_next_update_average_magnetometer)
     {
-        update = 1;
+        SET_BIT(update, STATUS_UPDATE_AVERAGE);
         configuration.time_to_next_update_average_magnetometer = configuration.interval_average_magnetometer;
     }
     else {
-        update = 0;
+        CLEAR_BIT(update, STATUS_UPDATE_AVERAGE);
         configuration.time_to_next_update_average_magnetometer -= delta_millis;
     }
 
-    if(update | GET_BIT(force, STATUS_UPDATE_AVERAGE))
+    if(GET_BIT(update, STATUS_UPDATE_AVERAGE) | GET_BIT(force, STATUS_UPDATE_AVERAGE))
     {
         //Serial.println();
         //Serial.print(millis());
@@ -1015,15 +1033,15 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
 
     if(delta_millis >= configuration.time_to_next_report_magnetometer)
     {
-        update = 1;
+        SET_BIT(update, STATUS_REPORT);
         configuration.time_to_next_report_magnetometer = configuration.interval_print_magnetometer;
     }
     else {
-        update = 0;
+        CLEAR_BIT(update, STATUS_REPORT);
         configuration.time_to_next_report_magnetometer -= delta_millis;
     }
 
-    if((report && update) || GET_BIT(force, STATUS_REPORT))
+    if((report && GET_BIT(update, STATUS_REPORT)) || GET_BIT(force, STATUS_REPORT))
     {
         if(valsMagnetometer.filled_elements)
         {
@@ -1033,8 +1051,8 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
             //Serial.println(": Mrpt");
 
             //Serial.print("Previous Average: ");
-            Serial.print(valsMagnetometer.prev_average);
-            Serial.print("\t");
+            //Serial.print(valsMagnetometer.prev_average);
+            //Serial.print("\t");
             //Serial.println(" uT");
 
             //Serial.print("Average: ");
@@ -1068,31 +1086,33 @@ void doMagnetometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
         configuration.time_to_next_update_magnetometer -= delta_millis;
     }
 
-    if(update | GET_BIT(force, STATUS_UPDATE))
+    if(GET_BIT(update, STATUS_UPDATE) || GET_BIT(force, STATUS_UPDATE))
     {
         //Serial.println();
         //Serial.print(millis());
         //Serial.println(": Mapd");
         append32(&valsMagnetometer, sensorMagnetometerReadValue(0));
     }
+
+    return (update | force);
 }
 
-void doBarometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
+uint8_t doBarometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
 {
     uint8_t update = 0;
     int32_t diff = 0;
 
     if(delta_millis >= configuration.time_to_next_update_average_barometer)
     {
-        update = 1;
+        SET_BIT(update, STATUS_UPDATE_AVERAGE);
         configuration.time_to_next_update_average_barometer = configuration.interval_average_barometer;
     }
     else {
-        update = 0;
+        CLEAR_BIT(update, STATUS_UPDATE_AVERAGE);
         configuration.time_to_next_update_average_barometer -= delta_millis;
     }
 
-    if(update | GET_BIT(force, STATUS_UPDATE_AVERAGE))
+    if(GET_BIT(update, STATUS_UPDATE_AVERAGE) || GET_BIT(force, STATUS_UPDATE_AVERAGE))
     {
         //Serial.println();
         //Serial.print(millis());
@@ -1102,15 +1122,15 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
 
     if(delta_millis >= configuration.time_to_next_report_barometer)
     {
-        update = 1;
+        SET_BIT(update, STATUS_REPORT);
         configuration.time_to_next_report_barometer = configuration.interval_print_barometer;
     }
     else {
-        update = 0;
+        CLEAR_BIT(update, STATUS_REPORT);
         configuration.time_to_next_report_barometer -= delta_millis;
     }
 
-    if((report && update) || GET_BIT(force, STATUS_REPORT))
+    if((report && GET_BIT(update, STATUS_REPORT)) || GET_BIT(force, STATUS_REPORT))
     {
         if(valsBarometer.filled_elements)
         {
@@ -1120,8 +1140,8 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
             //Serial.println(": Brpt");
 
             //Serial.print("Previous Average: ");
-            Serial.print(valsBarometer.prev_average);
-            Serial.print("\t");
+            //Serial.print(valsBarometer.prev_average);
+            //Serial.print("\t");
             //Serial.println(" Pa");
 
             //Serial.print("Average: ");
@@ -1140,15 +1160,15 @@ void doBarometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
 
     if(delta_millis >= configuration.time_to_next_update_barometer)
     {
-        update = 1;
+        SET_BIT(update, STATUS_UPDATE);
         configuration.time_to_next_update_barometer = configuration.interval_read_barometer;
     }
     else {
-        update = 0;
+        CLEAR_BIT(update, STATUS_UPDATE);
         configuration.time_to_next_update_barometer -= delta_millis;
     }
 
-    if(update | GET_BIT(force, STATUS_UPDATE))
+    if(GET_BIT(update, STATUS_UPDATE) || GET_BIT(force, STATUS_UPDATE))
     {
         //Serial.println();
         //Serial.print(millis());
@@ -1271,6 +1291,7 @@ void disableAudioVisualBeacon()
 void setState(uint8_t newState)
 {
     uint8_t set = STATE_GROUND_IDLE;
+    uint16_t diff = 0;
     
     if(newState <= STATE_MAX_STATE)
     {
@@ -1297,7 +1318,27 @@ void setState(uint8_t newState)
         case STATE_GROUND_IDLE_ON_PAD:
         {
             disableAudioVisualBeacon();
+
+            // Make sure we have something in the arrays for small initial magnitude deltas
+            if(valsAccelerometer.filled_elements < SENSORS_NUM_VALUES)
+            {
+
+                for(diff = 0; diff < SENSORS_NUM_VALUES; diff++)
+                {
+                    doBarometerActions(0, ((1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)), 0);
+                    
+                    doAccelerometerActions(0, ((1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)), 0);
+                    
+                    doMagnetometerActions(0, ((1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)), 0);
+
+
+                }
+            }
+
+            groundStationAccelerationMagnitude = valsAccelerometer.average;
+            groundStationPressure = valsBarometer.average;
             peakAltitudePressure = valsBarometer.average;
+
             panicTimerReset();
             resetParachute();
             break;
@@ -1350,28 +1391,30 @@ void stateMachine(uint16_t delta_millis)
     {
         case STATE_GROUND_IDLE_ON_PAD:
         {
-            // Make sure we have something in the arrays for small initial magnitude deltas
-            if(valsAccelerometer.filled_elements < SENSORS_NUM_VALUES)
+            // Keep watch on idle acceleration
+            diff = doAccelerometerActions(delta_millis, 0, 0);
+            if(GET_BIT(diff, STATUS_UPDATE_AVERAGE))
             {
-                for(diff = 0; diff < SENSORS_NUM_VALUES; diff++)
-                {
-                    doBarometerActions(0, ((1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)), 0);
-                    
-                    doAccelerometerActions(0, ((1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)), 0);
-                    
-                    doMagnetometerActions(0, ((1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)), 0);
-
-                }
+                groundStationAccelerationMagnitude = valsAccelerometer.average;
             }
-
-            doAccelerometerActions(delta_millis, 0, 0);
+            diff = 0;
 
             // Keep watch on arming trigger
-            doMagnetometerActions(delta_millis, 0, 1);
+            diff = doMagnetometerActions(delta_millis, 0, 1);
+            if(GET_BIT(diff, STATUS_UPDATE_AVERAGE))
+            {
+                //unarmedMagnetometerMagnitude = valsMagnetometer.average;
+                
+            }
+            diff = 0;
 
             // Keep watch on barometer, probably not the fastest changes, but we don't want a high magnitude just as we arm...
-            doBarometerActions(delta_millis, 0, 0);
-
+            diff = doBarometerActions(delta_millis, 0, 0);
+            if(GET_BIT(diff, STATUS_UPDATE_AVERAGE))
+            {
+                groundStationPressure = valsBarometer.average;
+            }
+            diff = 0;
 
             // Magnetometer
             if(valsMagnetometer.prev_average > valsMagnetometer.average)
@@ -1385,6 +1428,9 @@ void stateMachine(uint16_t delta_millis)
             
             if(diff > configuration.limit_delta_magnetometer)
             {
+                // Current average is no longer the unarmed value!
+                //unarmedMagnetometerMagnitude = valsAccelerometer.prev_average;
+                
                 Serial.print(millis());
                 Serial.println(": MAGNETOMETER MAGNITUDE ABOVE THRESHOLD");
                 setState(STATE_GROUND_ARMED);
@@ -1396,11 +1442,18 @@ void stateMachine(uint16_t delta_millis)
         {
             // Check the two possible launch-indicative magnutides
             doAccelerometerActions(delta_millis, 0, 1);
-            doBarometerActions(delta_millis, 0, 1);
+
+
+            diff = doBarometerActions(delta_millis, 0, 1);
+            if(GET_BIT(diff, STATUS_UPDATE_AVERAGE))
+            {
+                peakAltitudePressure = valsBarometer.average;
+            }
+
             doMagnetometerActions(delta_millis, 0, 0);
 
             // Accelerometer
-            diff = abs(valsAccelerometer.prev_average - valsAccelerometer.average);
+            diff = abs(valsAccelerometer.average - groundStationAccelerationMagnitude);
             
             if(diff > configuration.limit_delta_accelerometer)
             {
@@ -1410,7 +1463,7 @@ void stateMachine(uint16_t delta_millis)
             }
 
             // Barometer
-            diff = abs(valsBarometer.average - valsBarometer.prev_average);
+            diff = abs(valsBarometer.average - groundStationPressure);
             
             if(diff > configuration.limit_delta_barometer)
             {
@@ -1436,17 +1489,18 @@ void stateMachine(uint16_t delta_millis)
                 peakAltitudePressure = valsBarometer.average;
             }
 
+            if(valsAccelerometer.average > peakLaunchAverageAccelerationMagnitude)
+            {
+                peakLaunchAverageAccelerationMagnitude = valsAccelerometer.average;
+            }
+
             diff = 0;
             
             // count down positive barometer deltas, indicating a decreasing height
             // A single positive value could perhaps simply be from pressure oscillations inside the payload capsule due to turbulence during launch, so we could get a premature deployment of parachute?
-            if(valsBarometer.prev_average < valsBarometer.average)
+            if(valsBarometer.average > peakAltitudePressure)
             {
-                // Decreasing
-                diff = (valsBarometer.average - valsBarometer.prev_average);
-
-                // Decreasing by enough?
-                if(diff > configuration.limit_delta_barometer)
+                if((valsBarometer.average - peakAltitudePressure) > configuration.limit_delta_barometer)
                 {
                     Serial.print(millis());
                     Serial.print(": BAROMETER MAGNITUDE ABOVE THRESHOLD (");
@@ -1458,7 +1512,7 @@ void stateMachine(uint16_t delta_millis)
                     barometerdeltastrikes--;
                 }
             }
-            
+
             if(barometerdeltastrikes == 0)
             {
                 Serial.print(millis());
@@ -1590,7 +1644,6 @@ void grabSerial()
 
 }
 
-
 void setup()
 {
     uint8_t sensorStatus = 0;
@@ -1611,12 +1664,8 @@ void setup()
     Serial.println(COMMAND_LINE_APPEND_THRESHOLD);
     */
     
-    //Serial.println("Clearing command buffer...");
-    for(cmdlength = COMMAND_LINE_BUFFER_SIZE; cmdlength > 0; cmdlength--)
-    {
-        cmdline[cmdlength-1] = '\0';
-    }
-    
+    clearCommandBuffer();
+
     /*
     Serial.print("Command line length: ");
     Serial.println(cmdlength);
