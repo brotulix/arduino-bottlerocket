@@ -1394,18 +1394,18 @@ void stateMachine(uint16_t delta_millis)
             // Keep watch on idle acceleration
             diff = doAccelerometerActions(delta_millis, 0, 0);
             if(GET_BIT(diff, STATUS_UPDATE_AVERAGE))
-            {
+                {
                 groundStationAccelerationMagnitude = valsAccelerometer.average;
             }
             diff = 0;
-
+                    
             // Keep watch on arming trigger
             diff = doMagnetometerActions(delta_millis, 0, 1);
             if(GET_BIT(diff, STATUS_UPDATE_AVERAGE))
             {
                 //unarmedMagnetometerMagnitude = valsMagnetometer.average;
-                
-            }
+
+                }
             diff = 0;
 
             // Keep watch on barometer, probably not the fastest changes, but we don't want a high magnitude just as we arm...
@@ -1512,7 +1512,7 @@ void stateMachine(uint16_t delta_millis)
                     barometerdeltastrikes--;
                 }
             }
-
+            
             if(barometerdeltastrikes == 0)
             {
                 Serial.print(millis());
@@ -1665,7 +1665,7 @@ void setup()
     */
     
     clearCommandBuffer();
-
+    
     /*
     Serial.print("Command line length: ");
     Serial.println(cmdlength);
