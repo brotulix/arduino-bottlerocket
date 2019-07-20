@@ -336,6 +336,12 @@ During debugging, it would be nice to know a little about what the state machine
 Status reporting could follow a standard format, such as:
 `Sa` followed at relevant frequencies by `Abb.bbb`, `Bcc.ccc`, `Mdd.ddd`, `Ree.eee` and `Tff.fff` for accelerometer, barometer, magnetometer, RSSI and thermometer, respectively. GPS, if implemented, could be reported with `G1gg.ggggggG2hh.hhhhhhG3ii.iii` (lat, lon, height) at no more than 1 Hz. LDR, if implemented, could be reported with `Ljj.jjj`.
 
+Implemented reporting scheme: `[millis]\tR\t[sensor]\t[average value]\t[diff from last average]\r\n`.
+
+`millis` is simply the result of `millis()`, eg. the uptime of the flight computer.
+
+`sensor` is `A`, `B`, `M` or `V` for accelerometer, barometer, magnetometer and battery voltage, respectively.
+
 Suggested reporting rates:
 
 * `GROUND_IDLE` states:
@@ -373,45 +379,120 @@ Suggested reporting rates:
   - RSSI: 10 Hz
   - Battery voltage: 1 Hz
 
+Implementation does not differentiate reporting rates in different states, but does differentiate on *reporting*:
+* Battery voltage is reported periodically in all states.
+* `STATE_GROUND_IDLE`: No reporting.
+* `STATE_GROUND_ON_PAD`: Magnetometer is reported.
+* `STATE_GROUND_ARMED`: Accelerometer and barometer is reported.
+* `STATE_AIRBORNE_OUTBOUND`: Accelerometer and barometer is reported.
+* `STATE_AIRBORNE_DEPLOYMENT`: Nothing is reported, since this state is only transitional.
+* `STATE_AIRBORNE_INBOUND`: Accelerometer and barometer is reported.
+* `STATE_GROUND_RECOVERY`: Magnetometer is reported.
+* `STATE_GROUND_DATADUMP`: Nothing is reported.
+
 
 
 ### Control messages
 A few important control messages are given:
 
-* Configuration: `CX`, where `X` is one of the following:
-  - `G`: Ground pressure: `Gnnnn.nn`.
-  
-  - `H`: Launch pad height: `Hnnn.n`.
-  
-  - `A`: Averaging: `AX:y`, where `X` is `A`, `B`, `M` for accelerometer, barometer, magnetometer, respectively, and `y` indicates how many samples to average over, in a single hex digit (0-F). Default is 9. Maximum depends on available memory.
-  
-  - `TXy.y`: Timeouts, where `X` is either
-    - `O`: Outbound, or
-    - `I`: Inbound
-    and `y.y` is a timeout in seconds (0.0 to 9.9).
+* Configuration: `C`. A single `C` will report the current configuration. Setting configuration options using the following syntax:
+```
+C       Configuration
+|
++ B       Buzzer frequency
+|
++ I       Intervals
+| + A       Accelerometer
+| | + A       Averaging
+| | + P       Printing
+| | ` R       Read
+| |
+| + B       Barometer
+| | + A       Averaging
+| | + P       Printing
+| | ` R       Read
+| |
+| + M       Magnetometer
+| | + A       Averaging
+| | + P       Printing
+| | ` R       Read
+| |
+| + V       Battery voltage
+|   + A       Averaging
+|   + P       Printing
+|   ` R       Read
+|
++ L       Limits
+| + A       Accelerometer
+| + B       Barometer
+| + M       Magnetometer
+| ` V       Battery voltage
+|
++ S       Servo
+| + R       Release
+| ` S       Safe
+|
+` T       Timeouts
+  + I       Inbound
+  ` O       Outbound
+```
 
-  - `L`: Limits: `LXXyyyyy.yyyy`. `XX` indicates which limit to set:
-    - `AO`: accelerometer outbound (launch)
-    - `AI`: accelerometer inbound (landing)
-    - `B`: barometer delta (launch and landing)
-    - `M`: magnetometer delta (arm and recovery)
+Example Configuration report, with field descriptions added in square brackets:
+```
+Dumping configuration!
+2       [interval_read_accelerometer]
+50      [interval_read_barometer]
+50      [interval_read_magnetometer]
+10      [interval_average_accelerometer]
+50      [interval_average_barometer]
+500     [interval_average_magnetometer]
+10      [interval_print_accelerometer]
+50      [interval_print_barometer]
+500     [interval_print_magnetometer]
+5000    [interval_check_battery]
+250     [limit_delta_accelerometer]
+30      [limit_delta_barometer]
+60      [limit_delta_magnetometer]
+730     [limit_battery_voltage]
+3500    [panic_timeout_outbound]
+3000    [panic_timeout_inbound]
+4000    [buzzer_frequency]
+45      [servo_safe]
+0       [servo_release]
+```
 
-* Debug: `D`. The function of this command will vary during development.
 
-* Ping: `P`.
+* Debug: `D`. The function of this command will vary during development. As of 2019-07-20, the format is as follows:
+```
+----- DEBUG -----
+Current state is S0
+System time is 1197045
+Command buffer length: 2
+Current Accelerometer value: A: [-8.87, -0.31,  44.72]
+45.59
+Current Barometer value: B: 101110.00
+101110.00
+Current Magnetometer value: M: [-1.09, -67.09,  -20.92]
+70.28
+Current buzzer frequency is 4000 Hz
+Peak altitude pressure: -1.00
+```
+
+
+
+* Ping: `P`. Replies with a `P` of its own. Intended for RSSI measurement.
 
 * State machine transition: `Sn`, where `n` is the state level to apply (see above).
 
+
+
 Every command ends with semicolon (`;`). Tried using newline (`\n`), but that proved to be difficult to match.
 
-The maximum command line length is thus `CLAI9999.9999;` (14 characters). A command buffer of 32 characters is reserved for now. An interrupt function should perhaps handle incoming data on serial line to make sure successive commands are not dropped/corrupted, and incoming commands are serviced as soon as a newline is encountered.
+The maximum command line length is thus `CIAP9999.9999;` (14 characters). A command buffer of 16 characters is reserved for now. An interrupt function should perhaps handle incoming data on serial line to make sure successive commands are not dropped/corrupted, and incoming commands are serviced as soon as a separator is encountered.
 
 State machine transition commands will be accepted at **any** time.
 
 Configuration will only occur during `IDLE` states (`STATE_GROUND_IDLE` and `STATE_GROUND_IDLE_ON_PAD`).
-
-Ping command will prompt a Pong reply (a returned `P`). Mainly intended for RSSI measurements during recovery phase.
-
 
 
 
@@ -459,6 +540,8 @@ Various electronic components intended for inclusion:
 * [1s 500mAh - Syma X5HW X5HC](https://www.modellers.no/syma/35847/1s--500mah--syma-x5hw-x5hc) : 17 g
 * [1s 220mAh - 45C - Gens Ace Tattu](https://www.modellers.no/gens-ace/34720/1s--220mah--45c--gens-ace-tattu-5-pack-e-flite): 5.5 g
 
+
+
 ## Mechanical
 * Experimental parachute: 2.8 g
 * Latest rocket body (CCCP, no fuel): 117.5 g
@@ -474,12 +557,18 @@ Various electronic components intended for inclusion:
 *  10 g - Arduino + Barometer
 *   5 g - RF Transceiver
 *  10 g - Audiovisual beacon
-*  15 g - Battery
+*  ~~15~~ 30 g - Battery
 *  15 g - Servo
-*  15 g - Parachute(s)
-* 150 g - Rocket body with payload capsule
+*  ~~15~~ 3.3 g - Parachute(s)
+* ~~150~~ 104 g - Rocket body with payload capsule
 *  30 g - Various mechanical assemblages (eg. parachute deployment)
-= 250 g Total
+* = ~~250~~ 207.3 g Total
+
+At launch time 2019-07-19, the rocket was weighed in at 283.9 grams (including RBF), somewhat over weight budget. 278.7 g without RBF.
+
+140.7 g total payload (including padding, excluding battery and parachute).
+
+
 
 
 
@@ -594,7 +683,49 @@ Area: <img src="doc/equations/Eq_017.svg" title="pi*((2.16cm)/2)^2) = 3.6644 cm^
 Some proposals for extended features:
 * Grease the release mechanism for a potentially easier launch triggering.
 * Booster stage utilizing elastic luggage bands. Uncertain if we'll gain anything, or if it'll *only* complicate things.
-* Payload padding (plastic foam).
-* Compressed air parachute deployment using an inflated water balloon and solenoid valve. Con: Balloon takes up space, solenoid is probably heavy.
-* In case of noisy UART over 433 MHz: Add a few characters that signals start of a command, eg. `<SP><SP><SP>S6<LF>` to enter `STATE_GROUND_RECOVERY`.
+* ~~Payload padding (plastic foam).~~ Implemented.
+* Compressed air parachute deployment using an inflated water balloon and solenoid valve. Cons: Balloon takes up space, solenoid is probably heavy.
+* ~~In case of noisy UART over 433 MHz: Add a few characters that signals start of a command, eg. `<SP><SP><SP>S6<LF>` to enter `STATE_GROUND_RECOVERY`.~~
 * *More to come*...
+
+# Launches
+## 2019-07-19
+### Launch 1
+Pressure: Approx. ? bar.
+
+Fuel: 0.9 liter RP-1.
+
+### Launch 2
+Pressure: Approx. ? bar.
+
+Fuel: 0.9 liter RP-1.
+
+## 2019-07-20
+### Launch 3
+Pressure: Approx 3.5 bar.
+
+Fuel: 0.9 liter RP-1.
+
+Achieved altitude: ? meters.
+
+### Launch 4
+Pressure: Approx 4.5 bar.
+
+Fuel: 0.9 liter RP-1.
+
+Achieved altitude: approx. 25 meters.
+
+### Launch 5
+Pressure: Approx. 5 bar.
+
+Fuel: 0.9 liter RP-1.
+
+Achieved altitude: 43.2 meters.
+
+### Launch 6
+Pressure: Approx. 5 bar.
+
+Fuel: 0.9 liter RP-1.
+
+Achieved altitude: 44.54 meters.
+

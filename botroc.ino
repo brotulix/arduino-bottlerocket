@@ -118,8 +118,8 @@ sconfig configuration = {
     50,     // interval_print_barometer
     500,    // interval_print_magnetometer
     5000,   // interval_check_battery
-    250,    // limit_delta_accelerometer
-    30,     // limit_delta_barometer
+    20,    // limit_delta_accelerometer
+    10,     // limit_delta_barometer
     60,     // limit_delta_magnetometer
     730,    // limit_battery_voltage
     0,      // time_to_next_update_accelerometer
@@ -132,8 +132,8 @@ sconfig configuration = {
     0,      // time_to_next_report_barometer
     0,      // time_to_next_report_magnetometer
     0,      // time_to_next_read_battery_voltage
-    3500,   // panic_timeout_outbound
-    3000,   // panic_timeout_inbound
+    3000,   // panic_timeout_outbound
+    15000,   // panic_timeout_inbound
     4000,    // buzzer_frequency
     45,     // servo_safe
     0       // servo_release
@@ -1353,6 +1353,7 @@ void setState(uint8_t newState)
         {
             disableAudioVisualBeacon();
             barometerdeltastrikes = SENSORS_BAROMETER_STRIKES;
+            peakAltitudePressure = groundStationPressure;//valsBarometer.average;
             panicTimerReset();
             break;
         }
@@ -1394,7 +1395,7 @@ void stateMachine(uint16_t delta_millis)
             // Keep watch on idle acceleration
             diff = doAccelerometerActions(delta_millis, 0, 0);
             if(GET_BIT(diff, STATUS_UPDATE_AVERAGE))
-                {
+            {
                 groundStationAccelerationMagnitude = valsAccelerometer.average;
             }
             diff = 0;
@@ -1498,7 +1499,7 @@ void stateMachine(uint16_t delta_millis)
             
             // count down positive barometer deltas, indicating a decreasing height
             // A single positive value could perhaps simply be from pressure oscillations inside the payload capsule due to turbulence during launch, so we could get a premature deployment of parachute?
-            if(valsBarometer.average > peakAltitudePressure)
+            if(valsBarometer.average < groundStationPressure)
             {
                 if((valsBarometer.average - peakAltitudePressure) > configuration.limit_delta_barometer)
                 {
@@ -1512,7 +1513,7 @@ void stateMachine(uint16_t delta_millis)
                     barometerdeltastrikes--;
                 }
             }
-            
+
             if(barometerdeltastrikes == 0)
             {
                 Serial.print(millis());
@@ -1628,12 +1629,13 @@ void grabSerial()
         // Don't try to terminate past end of buffer
         if(cmdlength == COMMAND_LINE_BUFFER_SIZE)
         {
-            Serial.println("Command buffer at capacity!");
+            //Serial.println("Command buffer at capacity!");
             return;
         }
         if(cmdlength > COMMAND_LINE_BUFFER_SIZE)
         {
-            Serial.println("Command buffer capacity exceeded!");
+            Serial.println("E: Command buffer capacity exceeded!");
+            clearCommandBuffer();
             return;
         }
         
