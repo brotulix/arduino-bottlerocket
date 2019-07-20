@@ -150,12 +150,14 @@ Whenever magnet/optical switch is engaged, or a command through RF link is recei
 ### Ground, data-dump state
 `#define STATE_GROUND_DATA_DUMP 7`
 
+***This state is currently not used, using `STATE_GROUND_IDLE` instead.***
+
 Similar to idle state in that sensors are not read, and no values reported. Only wait for a command to start dumping all recorded data via RF link or transition to ground idle state.
 
 
 
 ### State machine diagram
-Insert diagram here.
+*Insert diagram here.*
 
 
 
@@ -166,7 +168,7 @@ Insert diagram here.
 
 
 ## Arduino
-Starting out with an Arduino Nano V3.0 board (6.0 g, ATMega328P), since it lends itself well to breadboard prototyping. I also have an Arduino-esque board marked *Deek-Robot* which is well suited for the final product (2.4 g, ATMega328P).
+Starting out with an Arduino Nano V3.0 board (6.0 g, ATMega328P), since it lends itself well to breadboard prototyping. I also have an Arduino-esque board marked *Deek-Robot* which is well suited for the final product (only 2.4 g, ATMega328P).
 
 
 
@@ -183,7 +185,9 @@ The current solution is to use an AVR Dragon and program the Nano via ISP, using
 
 
 ## RF Link
-The RF link currently chosen for the project is an old-ish 433 MHz module from Deal Extreme, the only markings being `TLC1101_V2.1`. It is based on the Texas Instruments chip [`CC110L`](https://www.ti.com/lit/ds/symlink/cc110l.pdf).
+
+### CC110L
+The RF link initially chosen for the project is an old-ish 433 MHz module from Deal Extreme, the only markings being `TLC1101_V2.1`. It is based on the Texas Instruments chip [`CC110L`](https://www.ti.com/lit/ds/symlink/cc110l.pdf).
 
 Some of its highlights are:
 * Programmable output power, up to +12dBm.
@@ -194,24 +198,23 @@ There is, however, an AtMega48 between us and the CC110L, possibly limiting its 
 
 The modules are *plug & play* at 9600 baud and 3.3V.
 
-### Transfer rate
+#### Transfer rate
 The board supposedly accepts a simple UART RX/TX connection, making it easy to interface with the Arduino. The 433 MHz is claimed to be able to operate at a baud rates of 4800, 9600 or 19200, using one of 256 selectable channels.
 
-
-
-### Range
+#### Range
 At 5V: TBD.
 
 At 3.3V: TBD.
-
 
 Antenna designs to be evaluated. Clover leaf or helical antennas may be feasible using thin wire taped to the inside of the payload capsule.
 
 Ground control antenna could be a clover leaf or helical for stationary use, and a yagi for direction finding in recovery.
 
-### RSSI (beacon mode)
+Initial tests using stock antenna indicates about 200 meter LOS range, but also reveals some issues with transmission: some data is transferred successfully, but then only garbled data. Some time later, data is again transferred successfully, before turning garbled again. Some form of checksum bits interfering?
 
-### Power draw
+#### RSSI (beacon mode)
+
+#### Power draw
 TI's data sheet indicates that the CC110L alone draws about 30mA in +10dBm transmit mode. The board also has an AtMega48 chip.
 
 It can successfully transmit data with 3.3V VCC at minimum distance.
@@ -229,6 +232,36 @@ Setting up the RF module for different power levels, still at 3.3V, yields the f
 * Level `0x05`: 95.9mV
 * Level `0x07`: 136mV
 * Any other value: 166mV ~= 10dBm
+
+
+
+### nRF24L01
+Initial tests with nRF24-modules were unsuccessful as no connection was achieved. New modules have been ordered.
+
+#### Transfer rate
+Supposedly up to 2Mbps, but probably not at max range.
+
+#### Range
+Supposedly up to 250 meters LOS.
+
+#### RSSI (beacon mode)
+
+#### Power draw
+TBD.
+
+
+### Bluetooth module (HC-06)
+#### Transfer rate
+Supports at least 115200 Bps.
+
+#### Range
+Range up to 70 meters LOS according to GPS test using the integrated bluetooth transceiver of a EliteBook 840 G2.
+
+#### RSSI (beacon mode)
+
+#### Power draw
+TBD.
+
 
 
 
@@ -265,54 +298,81 @@ So in summary, we probably want to monitor at least three interrupt sources. May
 The Adafruit library reads barometer pressure values as float. Using `uint16_t` instead may allow us to get enough precision and save some (global) memory by keeping the float value a local variable during sensor input only.
 
 #### Noise
+<!--
 #### Averaging
-#### Ascent detection
-#### Apex detection
-#### Descent detection
+*Averaging is identical for all sensors.*
+-->
 
-### Thermometer
+#### Ascent detection
+Ascent detection (transition from `STATE_GROUND_ARMED` to `STATE_AIRBORNE_OUTBOUND`) in two ways: barometer magnitude or acceleration magnitude above threshold.
+
+#### Apex detection
+Latest implementation will register ground pressure, and subsequently check for any registered pressure lower than this, and continually set the lowest pressure recorded as apex pressure.
+
+#### Descent detection
+Basic function of descent detection is to look for an increasing pressure. This could be done by alwas comparing `average` to `prev_average`.
+
+Launch 4 indicated an elevated pressure during thrust that triggered the first version of descent detection.
+
+The next iteration only checks for an increasing pressure if the pressure is less than ground station pressure (recorded at transition from `STATE_GROUND_IDLE_ON_PAD` to `STATE_GROUND_ARMED`). After three instances of a positive pressure difference between apex pressure and current average pressure, the parachute will deploy through state transition from `STATE_AIRBORNE_OUTBOUND` to `STATE_AIRBORNE_DEPLOYMENT`.
+
+
+
+<!-- ### Thermometer
 #### Noise
 #### Averaging
+-->
 
 ### Accelerometer
 #### Noise
-#### Averaging
-#### Apex detection
+<!--#### Averaging-->
+<!--#### Apex detection-->
 #### Launch detection
+A simple check for acceleration magnitude above threshold.
+
 #### Touchdown detection
+*Not implemented.*
 
 ### Magnetometer (RBF)
 #### Noise
-#### Averaging
+There is some noise in the presence of metallic objects and varying somewhat with location, so the threshold value must be watched and tweaked.
+
+<!--#### Averaging-->
 #### RBF Detection
+A simple threshold detection. Triggering met variable success before the RBF got a  "focusing conduit" for magnetic flux via a nut and bolt. This gave a much more reliable triggering than a "coin" taped to the inside of the payload capsule, and also a visually identifiable spot to attach the RBF.
 
 
 
 ## Flash memory
-Write only full pages to avoid/minimize data loss.
+Write only full pages to avoid/minimize data loss?
 
 How many erase/write cycles can be expected?
 
 ### Power draw
-Idle, erasing/writing, reading.
+*TBD: Idle, erasing/writing, reading.*
 
 
 ## GPS
-The lightest GPS module in my possession at the moment is a (fake?) ublox Neo 6M with a replaced, external chip antenna. It is configurable to higher baud rates, but will not store its settings.
+The lightest GPS module in my possession at the moment is a (fake?) ublox Neo 6M with a replaced, external chip antenna. It is configurable to higher baud rates, but will seemingly not store its settings.
 
+*GPS is currently not utilized.*
+
+<!--
 ### Power draw
 ### Accuracy
 ### Update rate
 ### Acquisition time
+-->
 
 
 
 ## Audio-visual beacon
 
 ### Power draw
-Idle and active states, audio and visual.
+*TBD: Idle and active states, audio and visual.*
+Three red/blue flashing LEDs, each drawing about 7 mA at 3.3V, are driven in parallell. The LEDs are driven directly at 5V (has not killed the LEDs yet), but the current draw at 5V has not been recorded.
 
-
+Buzzer is also driven at 5V, and current draw has not been measured.
 
 
 
@@ -334,13 +394,11 @@ Some status messages are given, such as
 During debugging, it would be nice to know a little about what the state machine is doing, so a debug statement would also be handy.
 
 Status reporting could follow a standard format, such as:
-`Sa` followed at relevant frequencies by `Abb.bbb`, `Bcc.ccc`, `Mdd.ddd`, `Ree.eee` and `Tff.fff` for accelerometer, barometer, magnetometer, RSSI and thermometer, respectively. GPS, if implemented, could be reported with `G1gg.ggggggG2hh.hhhhhhG3ii.iii` (lat, lon, height) at no more than 1 Hz. LDR, if implemented, could be reported with `Ljj.jjj`.
+`Sa` followed at relevant frequencies by `Abb.bbb`, `Bcc.ccc`, `Mdd.ddd`, `Ree.eee` and `Tff.fff` for accelerometer, barometer, magnetometer, RSSI and thermometer, respectively.
 
-Implemented reporting scheme: `[millis]\tR\t[sensor]\t[average value]\t[diff from last average]\r\n`.
+GPS, if implemented, could be reported with `G1gg.ggggggG2hh.hhhhhhG3ii.iii` (lat, lon, height) at no more than 1 Hz.
 
-`millis` is simply the result of `millis()`, eg. the uptime of the flight computer.
-
-`sensor` is `A`, `B`, `M` or `V` for accelerometer, barometer, magnetometer and battery voltage, respectively.
+LDR, if implemented, could be reported with `Ljj.jjj`.
 
 Suggested reporting rates:
 
@@ -389,6 +447,12 @@ Implementation does not differentiate reporting rates in different states, but d
 * `STATE_AIRBORNE_INBOUND`: Accelerometer and barometer is reported.
 * `STATE_GROUND_RECOVERY`: Magnetometer is reported.
 * `STATE_GROUND_DATADUMP`: Nothing is reported.
+
+Implemented reporting scheme: `[millis]\tR\t[sensor]\t[average value]\t[diff from last average]\r\n`.
+
+`millis` is simply the result of `millis()`, eg. the uptime of the flight computer.
+
+`sensor` is `A`, `B`, `M` or `V` for accelerometer, barometer, magnetometer and battery voltage, respectively.
 
 
 
@@ -462,7 +526,7 @@ Dumping configuration!
 ```
 
 
-* Debug: `D`. The function of this command will vary during development. As of 2019-07-20, the format is as follows:
+* Debug: `D`. The function of this command will vary during development. As of 2019-07-20, the effect is a reply in the following format:
 ```
 ----- DEBUG -----
 Current state is S0
@@ -486,11 +550,11 @@ Peak altitude pressure: -1.00
 
 
 
-Every command ends with semicolon (`;`). Tried using newline (`\n`), but that proved to be difficult to match.
+Every command ends with semicolon (`;`). Tried initially to use newline (`\n`), but that proved to be difficult to match.
 
 The maximum command line length is thus `CIAP9999.9999;` (14 characters). A command buffer of 16 characters is reserved for now. An interrupt function should perhaps handle incoming data on serial line to make sure successive commands are not dropped/corrupted, and incoming commands are serviced as soon as a separator is encountered.
 
-State machine transition commands will be accepted at **any** time.
+State machine transition commands shall be accepted at **any** time.
 
 Configuration will only occur during `IDLE` states (`STATE_GROUND_IDLE` and `STATE_GROUND_IDLE_ON_PAD`).
 
@@ -507,9 +571,6 @@ Various motors found around my place:
 * Generic toy motor: 17.1 g
 * Unknown (including mount): 21.0 g
 * Unknown (excluding mount): 17.9 g
-
-So in conclusion we'll go for the 9g micro servo motor.
-Ideally, we'll find out how to make it spin without end stops, but it may work even with its limited travel, depending on our deployment mechanism.
 
 ## Electronics
 Various electronic components intended for inclusion:
@@ -577,17 +638,28 @@ At launch time 2019-07-19, the rocket was weighed in at 283.9 grams (including R
 ### Prior experience
 An earlier system similar to (insert video URL) was tested. It seemed to work fairly well, but during flight testing, the parachute lodged itself between the parachute hatch and the parachute eject spring.
 
-### Proposed mechanism
+### Parachute
+The previous system used a bio-degradable bag for compostable waste with some success (light, and seemingly strong enough). The bags used, however, meant a rather small parachute, and access to larger bio-degradable trash bags (30L) may allow us to make a larger parachute.
+
+A prototype parachute was made with approximately Ø XX mm and a hole of approximately Ø YY mm in the center. Eight sewing thread cords were attached along the edge of the parachute using tape. 
+
+Later tests demonstrated the need for the thread to be folded back over itself at least one full turn "around" the tape to have sufficient friction to not be torn out from the tape when the parachute deploys.
+
+### Proposed mechanism, Rev. 1
 A mechanism made from a compressible spring and a tube containing the parachute to be deployed out through the side of the payload capsule. Strings attached to the front of the spring (towards parachute) will hook onto the arm of a servo motor, holding it coiled until deploymet.
 
-### Prototype
-A quick prototype was attempted, using some Kevlar string, a piece of polycarbonate, a spring and some screws and washers. It proved to be difficult to keep the spring coiled neatly, even inside a tube, and the strings easily got snagged. However, in the search for a suitable spring, a vacuum pump for removal of solder was disassembled; it has a very neat release mechanism and a perfectly sized spring.
+### Prototype, Rev. 1
+A quick prototype was attempted, using some Kevlar string, a piece of polycarbonate, a spring and some screws and washers. It proved to be difficult to keep the spring coiled neatly, even inside a tube, and the strings easily got snagged.
 
-Two vacuum pumps and some additional materials (Ø5mm brass rod) were acquired, and some hours later a working prototype release mechanism had been conceived.
+### Proposed mechanism, Rev. 2
+In the search for a suitable spring, for Rev. 1, a vacuum pump for removal of solder was disassembled; it has a very neat release mechanism and a perfectly sized spring for a OD 20mm *"K-rør"* (ID 17mm).
 
-A 30 liter bio-degradable waste bag just barely fits inside a 75mm long piece of OD 20mm *"*K-rør"* (ID 17mm). The spring easily compresses to about half this length, so approximately 45mm is taken as the latching point for the first prototype.
+A piston with a notched rod interacts with a spring-loaded release mechanism (push-button) inspired by a solder vacuum pump. The button can be depressed by the servo motor to eject the parachute from the tube. A clip in another notch near the end of travel prevents the whole piston from escaping the release mechanism.
 
+A 30 liter bio-degradable waste bag just barely fits inside a 75mm long piece of 20mm *"K-rør"*. The vacuum pump spring easily compresses to about half this length, so approximately 45mm is taken as the latching point for the first Rev. 2 prototype.
 
+### Prototype, Rev. 2
+The prototype works very well, and the *"9g Micro Servo"* easily triggers the push-button release mechanism.
 
 
 
@@ -595,8 +667,6 @@ A 30 liter bio-degradable waste bag just barely fits inside a 75mm long piece of
 ***Warning***: Here be dragons, errors and bad, bad numbers.
 
 ## Energy ##
-
-Energy needed to move our estimated 250 g loaded rocket to a height of, say, 30 meters:
 
 <!--
 Create equations here:
@@ -606,13 +676,15 @@ GitHub doesn't cooperate very well with directly embedded images with url as suc
 https://latex.codecogs.com/svg.latex?\Large&space;
 -->
 
-Potential and kinetic energy:
+### Potential and kinetic energy:
 
 - <img src="doc/equations/Eq_001.svg" title="Ep = Ek" />
 
 - <img src="doc/equations/Eq_002.svg" title="mgh = (mv^2)/2"/>
 
-Potential energy:
+### Potential energy:
+#### Initial calculation:
+Energy needed to move our estimated 250 g loaded rocket to a height of, say, 30 meters:
 
 - <img src="doc/equations/Eq_003.svg" title="Ep = mgh = 0.25 * 9.81 * 30 [kg * m/(s^2) * m]"/>
 
@@ -622,8 +694,17 @@ Potential energy:
 
 - <img src="doc/equations/Eq_006.svg" title="Ep = 73.575 [J]"/>
 
+#### Post-fact calculation:
+Energy required to move our measured 278 g loaded rocket to a height of 44.54 meters:
 
-Force:
+- <img src="doc/equations/Eq_023.svg" title="Ep = mgh"/>
+
+- <img src="doc/equations/Eq_024.svg" title="Ep = 0.278 * 9.81 * 44.54 [kg * m/s^2 * m]"/>
+
+- <img src="doc/equations/Eq_025.svg" title="Ep = 121.47 [J]"/>
+
+
+### Force:
 
 - <img src="doc/equations/Eq_007.svg" title="F = ma => a = F/m"/>
 
@@ -634,14 +715,14 @@ Force:
 -->
 
 
-Velocity:
+### Velocity:
 
 - <img src="doc/equations/Eq_008.svg" title="v = a*t"/>
 
 - <img src="doc/equations/Eq_009.svg" title="v = ???"/>
 
 
-Kinetic energy:
+### Kinetic energy:
 
 - <img src="doc/equations/Eq_010.svg" title="Ek = 0.5 * 0.25 * v^2"/>
 
@@ -661,6 +742,22 @@ Kinetic energy:
 
 - <img src="doc/equations/Eq_016.svg" title="= 50 [N/cm^2]"/>
 
+<!-- V_{eng}^{0} = V_{fuel}+V_{ox}^{0} -->
+<!-- Eq_026 -->
+- <img src="doc/equations/Eq_026.svg" title="V_{eng}^{0} = V_{fuel}+V_{ox}^{0}"/>
+
+<!-- 1.75[L] = 0.9[L] + 0.85[L] -->
+<!-- Eq_027 -->
+- <img src="doc/equations/Eq_027.svg" title="1.75[L] = 0.9[L] + 0.85[L]"/>
+
+<!-- V_{eng}^{5}= V_{fuel}+V_{ox}^{5} -->
+<!-- Eq_028 -->
+- <img src="doc/equations/Eq_028.svg" title="V_{eng}^{5}= V_{fuel}+V_{ox}^{5}"/>
+
+<!-- 5.15[L] = 0.9[L] + 4.25[L] -->
+<!-- Eq_029 -->
+- <img src="doc/equations/Eq_029.svg" title="5.15[L] = 0.9[L] + 4.25[L]"/>
+
 
 ## Bottle opening ##
 
@@ -678,6 +775,79 @@ Area: <img src="doc/equations/Eq_017.svg" title="pi*((2.16cm)/2)^2) = 3.6644 cm^
 - <img src="doc/equations/Eq_020.svg" title="(kgf = ~= 18 [kg])" />
 
 
+## Altitude
+Altitude based on difference in pressure:
+
+- <img src="doc/equations/Eq_021.svg" title="A = 44330 * (1-(p/p_0)^(1/5.255)"/>
+- <img src="doc/equations/Eq_022.svg" title="A ~= 44330 * (1-(p/p_0)^(0.1903)"/>
+<!--
+A \approx 44330 \cdot \left ( 1 - \left ( \frac{p}{p_0}\right)^{0.1903} \right )
+-->
+
+### Launch 3
+<!--
+```
+>> 44330 * (1-(100796.63/101118.75)^0.1903)
+
+ans =  26.908
+```
+-->
+<!-- A_{3} \approx 44330 \cdot \left ( 1 - \left ( \frac{100796.63}{101118.75}\right)^{0.1903} \right ) -->
+<!-- Eq_036 -->
+<!-- A_{3} \approx 26.908 [m] -->
+<!-- Eq_037 -->
+- <img src="doc/equations/Eq_036.svg" title="A_{3} \approx 44330 \cdot \left ( 1 - \left ( \frac{100796.63}{101118.75}\right)^{0.1903} \right )" />
+
+- <img src="doc/equations/Eq_037.svg" title="A_{3} \approx 26.908 [m]" />
+
+### Launch 4
+<!--
+```
+>> 44330 * (1-(100819.75/101120.5)^0.1903)
+
+ans =  25.120
+```
+-->
+<!-- A_{4} \approx 44330 \cdot \left ( 1 - \left ( \frac{100819.75}{101120.5}\right)^{0.1903} \right ) -->
+<!-- Eq_030 -->
+<!-- A_{4} \approx 25.120 [m] -->
+<!-- Eq_031 -->
+- <img src="doc/equations/Eq_030.svg" title="A_{4} \approx 44330 \cdot \left ( 1 - \left ( \frac{100819.75}{101120.5}\right)^{0.1903} \right )" />
+
+- <img src="doc/equations/Eq_031.svg" title="A_{4} \approx 25.120 [m]" />
+
+### Launch 5
+<!--
+```
+>> 44330 * (1-(100563.5/101080.0)^0.1903)
+
+ans =  43.196
+```
+-->
+<!-- A_{5} \approx 44330 \cdot \left ( 1 - \left ( \frac{100563.5}{101080.0}\right)^{0.1903} \right ) -->
+<!-- Eq_032 -->
+<!-- A_{5} \approx 43.196 [m] -->
+<!-- Eq_033 -->
+- <img src="doc/equations/Eq_032.svg" title="A_{5} \approx 44330 \cdot \left ( 1 - \left ( \frac{100563.5}{101080.0}\right)^{0.1903} \right )" />
+
+- <img src="doc/equations/Eq_033.svg" title="A_{5} \approx 43.196 [m]" />
+
+### Launch 6
+<!--
+```
+>> 44330 * (1-(100541.5/101074.0)^0.1903)
+
+ans =  44.539
+```
+-->
+<!-- A_{6} \approx 44330 \cdot \left ( 1 - \left ( \frac{100541.5}{101074.0}\right)^{0.1903} \right ) -->
+<!-- Eq_034 -->
+<!-- A_{6} \approx 44.539 [m] -->
+<!-- Eq_035 -->
+- <img src="doc/equations/Eq_034.svg" title="A_{6} \approx 44330 \cdot \left ( 1 - \left ( \frac{100541.5}{101074.0}\right)^{0.1903} \right )" />
+
+- <img src="doc/equations/Eq_035.svg" title="A_{6} \approx 44.539 [m]" />
+
 
 # Proposals
 Some proposals for extended features:
@@ -686,6 +856,10 @@ Some proposals for extended features:
 * ~~Payload padding (plastic foam).~~ Implemented.
 * Compressed air parachute deployment using an inflated water balloon and solenoid valve. Cons: Balloon takes up space, solenoid is probably heavy.
 * ~~In case of noisy UART over 433 MHz: Add a few characters that signals start of a command, eg. `<SP><SP><SP>S6<LF>` to enter `STATE_GROUND_RECOVERY`.~~
+* ***Someone on the internet*** used soapy water: Why? Test the effect of a few different concentrations (differently coloured; RP-2, RP-3, ...) versus normal water (clear; RP-1).
+* In the same theme, try warm (not too warm, the PET bottle may shrink and/or weaken!) and/or cold water?
+* Install cords to help arm the parachute deployment mechanism (when the rocket is bumped a little, the piston will not fully depress, preventing the mechanism from locking).
+* Estimate outbound velocity based on increase in pressure, and thus acceleration, compare force to force excerted by the pressurized air?
 * *More to come*...
 
 # Launches
