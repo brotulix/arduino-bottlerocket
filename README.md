@@ -780,6 +780,12 @@ Altitude based on difference in pressure:
 
 - <img src="doc/equations/Eq_021.svg" title="A = 44330 * (1-(p/p_0)^(1/5.255)"/>
 - <img src="doc/equations/Eq_022.svg" title="A ~= 44330 * (1-(p/p_0)^(0.1903)"/>
+
+According to the Wikipedia article on [Atmospheric Pressure vs. Altitude](https://en.wikipedia.org/wiki/Atmospheric_pressure#Altitude_variation), "At low altitudes above sea level, the pressure decreases by about 1.2 kPa for every 100 metres", or 12 Pascal per meter.
+
+<!-- A = \frac{\left ( p_0 - p \right ) } {12} -->
+- <img src="doc/equations/Eq_038.svg" title="A = (p_0 - p) / 12" />
+
 <!--
 A \approx 44330 \cdot \left ( 1 - \left ( \frac{p}{p_0}\right)^{0.1903} \right )
 -->
@@ -800,6 +806,13 @@ ans =  26.908
 
 - <img src="doc/equations/Eq_037.svg" title="A_{3} \approx 26.908 [m]" />
 
+Simple calculation:
+
+<!-- A = \frac{\left ( 101118.75 - 100796.63 \right ) } {12} -->
+- <img src="doc/equations/Eq_039.svg" title="A_{3} = (101118.75 - 100796.63) / 12" />
+
+- <img src="doc/equations/Eq_040.svg" title="A_{3} = 26.843 [m]" />
+
 ### Launch 4
 <!--
 ```
@@ -815,6 +828,13 @@ ans =  25.120
 - <img src="doc/equations/Eq_030.svg" title="A_{4} \approx 44330 \cdot \left ( 1 - \left ( \frac{100819.75}{101120.5}\right)^{0.1903} \right )" />
 
 - <img src="doc/equations/Eq_031.svg" title="A_{4} \approx 25.120 [m]" />
+
+Simple calculation:
+
+<!-- A = \frac{\left ( 101118.75 - 100796.63 \right ) } {12} -->
+- <img src="doc/equations/Eq_041.svg" title="A_{4} = (101120.5 - 100819.75) / 12" />
+
+- <img src="doc/equations/Eq_042.svg" title="A_{4} = 25.062 [m]" />
 
 ### Launch 5
 <!--
@@ -832,6 +852,13 @@ ans =  43.196
 
 - <img src="doc/equations/Eq_033.svg" title="A_{5} \approx 43.196 [m]" />
 
+Simple calculation:
+
+<!-- A = \frac{\left ( 101118.75 - 100796.63 \right ) } {12} -->
+- <img src="doc/equations/Eq_043.svg" title="A_{5} = (101080.0 - 100563.5) / 12" />
+
+- <img src="doc/equations/Eq_044.svg" title="A_{5} = 43.042 [m]" />
+
 ### Launch 6
 <!--
 ```
@@ -847,6 +874,13 @@ ans =  44.539
 - <img src="doc/equations/Eq_034.svg" title="A_{6} \approx 44330 \cdot \left ( 1 - \left ( \frac{100541.5}{101074.0}\right)^{0.1903} \right )" />
 
 - <img src="doc/equations/Eq_035.svg" title="A_{6} \approx 44.539 [m]" />
+
+Simple calculation:
+
+<!-- A = \frac{\left ( 101118.75 - 100796.63 \right ) } {12} -->
+- <img src="doc/equations/Eq_045.svg" title="A_{6} = (101074.0 - 100541.5) / 12" />
+
+- <img src="doc/equations/Eq_046.svg" title="A_{6} = 44.375 [m]" />
 
 
 # Proposals
