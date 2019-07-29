@@ -722,6 +722,19 @@ Energy required to move our measured 278 g loaded rocket to a height of 44.54 me
 - <img src="doc/equations/Eq_009.svg" title="v = ???"/>
 
 
+### Acceleration
+At the release the mass of the rocket is 0.278 kg plus about 0.9 kg of fuel. With 5 bar, the force of `F=ma` should be approximately 183.22 N, so acceleration should be
+
+- <img src="doc/equations/Eq_047.svg" title="F=ma -> a=F/m"/>
+
+<!-- a=\frac{183.22[N]}{0.278[kg]+0.9[kg]}=\frac{183.22[N]}{1.178[kg]}=155.53[\tfrac{m}{s^2}] -->
+
+- <img src="doc/equations/Eq_048.svg" title="a_full=..."/>
+
+
+- <img src="doc/equations/Eq_049.svg" title="a_empty=..."/>
+
+
 ### Kinetic energy:
 
 - <img src="doc/equations/Eq_010.svg" title="Ek = 0.5 * 0.25 * v^2"/>
@@ -899,12 +912,12 @@ Some proposals for extended features:
 # Launches
 ## 2019-07-19
 ### Launch 1
-Pressure: Approx. ? bar.
+Pressure: Approx. 5 bar.
 
 Fuel: 0.9 liter RP-1.
 
 ### Launch 2
-Pressure: Approx. ? bar.
+Pressure: Approx. 3.5 bar.
 
 Fuel: 0.9 liter RP-1.
 
@@ -914,26 +927,26 @@ Pressure: Approx 3.5 bar.
 
 Fuel: 0.9 liter RP-1.
 
-Achieved altitude: ? meters.
+Achieved altitude: 26.9 meters.
 
 ### Launch 4
 Pressure: Approx 4.5 bar.
 
 Fuel: 0.9 liter RP-1.
 
-Achieved altitude: approx. 25 meters.
+Achieved altitude: 25.1 meters.
 
 ### Launch 5
 Pressure: Approx. 5 bar.
 
 Fuel: 0.9 liter RP-1.
 
-Achieved altitude: 43.2 meters.
+Achieved altitude: 43.1 meters.
 
 ### Launch 6
 Pressure: Approx. 5 bar.
 
 Fuel: 0.9 liter RP-1.
 
-Achieved altitude: 44.54 meters.
+Achieved altitude: 44.5 meters.
 
