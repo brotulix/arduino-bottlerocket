@@ -4,15 +4,25 @@
 #endif
 
 #include <Wire.h>
-#include <Adafruit_Sensor.h>        // *modified* Adafruit Unified Sensor library
-#include <Adafruit_BMP085_U.h>      // BMP085 Barometer
-#include <Adafruit_ADXL345_U.h>     // ADXL345 Accelerometer
-#include <Adafruit_HMC5883_U.h>     // HMC5883 Magnetometer
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BMP280.h>
+#include <MPU9250_asukiaaa.h>
 #include <Servo.h>
+#include <SPI.h>
+#include "nRF24L01.h"
+#include "RF24.h"
+
 
 #define SET_BIT(a, b)   (a |= (0x1 << b))
 #define CLEAR_BIT(a, b) (a &= ~(0x1 << b))
 #define GET_BIT(a, b)   (a & (0x1 << b))
+
+// Need an enum for message types
+// Need an enum for configuration fields
+// Need an enum for errors
+// Need an enum for debug messages?
+
+
 
 /*
 #define INTSRC_INTERRUPT                        2
@@ -22,13 +32,15 @@
 #define INTSRC_ACCELEROMETER                    6
 #define INTSRC_MAGNETOMETER                     7
 */
-#define SERVO_ENABLE_PIN                        7
-#define BUZZER_PIN                              8
-#define PARACHUTE_SERVO_PIN                     9
-#define BLINKER_PIN                             10
+#define PIN_RADIO_A                             5
+#define PIN_RADIO_B                             6
+#define PIN_SERVO_ENABLE                        7
+#define PIN_BUZZER                              8
+#define PIN_PARACHUTE_SERVO                     9
+#define PIN_BLINKER                             10
 #define I2C_SDA                                 18
 #define I2C_SCL                                 19
-#define BATTERY_VOLTAGE_PIN                     PIN_A2
+#define PIN_BATTERY_VOLTAGE                     PIN_A2
 
 
 #define STATUS_BAROMETER_DETECTED               0
@@ -40,116 +52,190 @@
 #define STATUS_UPDATE_AVERAGE                   1
 #define STATUS_REPORT                           2
 
-#define STATE_GROUND_IDLE                       0   // ### Ground, idle state
-#define STATE_GROUND_IDLE_ON_PAD                1   // ### Ground, on-pad idle state
-#define STATE_GROUND_ARMED                      2   // ### Ground, armed state
-#define STATE_AIRBORNE_OUTBOUND                 3   // ### Airborne, outbound state
-#define STATE_AIRBORNE_DEPLOYMENT               4   // ### Airborne, deployment state
-#define STATE_AIRBORNE_INBOUND                  5   // ### Airborne, inbound state
-#define STATE_GROUND_RECOVERY                   6   // ### Ground, recovery state
-#define STATE_GROUND_DATADUMP                   7   // ### Ground, data-dump state
-#define STATE_MAX_STATE                         STATE_GROUND_RECOVERY
+#define PIPE_READ                               0
+#define PIPE_WRITE                              1
 
-#define COMMAND_LINE_BUFFER_SIZE                16
+#define AVERAGING_FACTOR                        0.05    // = 1/20
+#define AVERAGING_COUNT                         20      // = 1/0.05
+
+typedef enum {
+    STATE_GROUND_IDLE           = (0x00),
+    STATE_GROUND_IDLE_ON_PAD    = (0x01),
+    STATE_GROUND_ARMED          = (0x02),
+    STATE_AIRBORNE_OUTBOUND     = (0x03),
+    STATE_AIRBORNE_DEPLOYMENT   = (0x04),
+    STATE_AIRBORNE_INBOUND      = (0x05),
+    STATE_GROUND_RECOVERY       = (0x06),
+    STATE_GROUND_RESET          = (0x07),
+    STATE_NUM_STATES            = (0x08),
+    
+    STATE_REPORT                = (0x52),   // 'R'
+    STATE_CHANGE                = (0x43)    // 'C'
+} t_e_states;
+
+typedef enum {
+    ERROR_OK,
+    ERROR_GENERIC,
+    ERROR_INVALID_COMMAND,
+    ERROR_INVALID_CONFIG,
+    ERROR_INVALID_STATE,
+    ERROR_MESSAGE_LENGTH,
+    ERROR_LOW_BATTERY_WARNING,
+    ERROR_PANIC_TIMEOUT,
+    ERROR_DEVICE_NOT_FOUND,
+    ERROR_SEND_FAILED
+} t_errs;
+
+typedef enum {
+    CONFIG_REPORT,
+
+    // Configurable part of configuration
+    CONFIG_INTERVAL_READ_ACCELEROMETER,
+    CONFIG_INTERVAL_READ_BAROMETER,
+    CONFIG_INTERVAL_READ_MAGNETOMETER,
+    CONFIG_INTERVAL_READ_BATTERY,
+    CONFIG_LIMIT_DELTA_ACCELEROMETER,
+    CONFIG_LIMIT_DELTA_BAROMETER,
+    CONFIG_LIMIT_DELTA_MAGNETOMETER,
+    CONFIG_LIMIT_BATTERY_VOLTAGE,
+    CONFIG_TIMEOUT_PANIC_OUTBOUND,
+    CONFIG_TIMEOUT_PANIC_INBOUND,
+    CONFIG_BUZZER_FREQUENCY,
+    CONFIG_SERVO_SAFE,
+    CONFIG_SERVO_RELEASE,
+    CONFIG_SERVO_HOLD
+} t_e_config_fields;
+
+typedef enum
+{
+    CMD_CONFIG                  = (0x244324), // "$C$"
+    CMD_DEBUG                   = (0x244424), // "$D$"
+    CMD_ERROR                   = (0x244524), // "$E$"
+    CMD_PINGPONG                = (0x245024), // "$P$"
+    CMD_READ                    = (0x245224), // "$R$"
+    CMD_STATE                   = (0x245324), // "$S$"
+    CMD_RESET                   = (0x245A24), // "$Z$"
+} t_e_commands;
+
+
+#define COMMAND_LINE_BUFFER_SIZE                32
 #define COMMAND_LINE_APPEND_THRESHOLD           ((COMMAND_LINE_BUFFER_SIZE / 4) * 3)
 
 #define SENSORS_NUM_VALUES                      8
 
-typedef struct {
-    float values[SENSORS_NUM_VALUES];
-    float prev_average;
-    float average;
-    uint8_t filled_elements;
-    uint8_t next_element_to_fill;
-    uint16_t spare;
-} savg;
+typedef struct
+{
+    union {
+        uint8_t id_long[4];
+        struct {
+            uint8_t id_short[3];
+            uint8_t state;
+        };
+        uint32_t id_full;
+    };
+    uint32_t millis;
+} t_msg_header;
 
-typedef struct {
-    uint32_t millis_previous_loop;
+typedef struct
+{
+    float x;
+    float y;
+    float z;
+    float magnitude;
+} t_vector;
+
+typedef struct
+{
+    t_msg_header header;
+    t_vector vector;
+} t_msg_accelerometer;
+
+typedef struct
+{
+    t_msg_header header;
+    t_vector vector;
+    uint16_t heading;   // Magnetic heading in 0.01 degree resolution
+} t_msg_magnetometer;
+
+typedef struct
+{
+    t_msg_header header;
+    float abs_pressure;
+    float temperature;
+    float altitude;
+    float apex_pressure;
+    float apex_altitude;
+    float ground_pressure;
+} t_msg_barometer;
+
+typedef struct
+{
+    uint32_t code;
+    uint32_t value;
+} t_msg_config;
+
+typedef struct
+{
+    t_msg_header header;
+    t_msg_config payload;
+} t_msg_debug;
+
+typedef struct
+{
     uint16_t interval_read_accelerometer;
     uint16_t interval_read_barometer;
     uint16_t interval_read_magnetometer;
-    uint16_t interval_average_accelerometer;
-    uint16_t interval_average_barometer;
-    uint16_t interval_average_magnetometer;
-    uint16_t interval_print_accelerometer;
-    uint16_t interval_print_barometer;
-    uint16_t interval_print_magnetometer;
-    uint16_t interval_check_battery;
+    uint16_t interval_read_battery;
     uint16_t limit_delta_accelerometer;
     uint16_t limit_delta_barometer;
     uint16_t limit_delta_magnetometer;
     uint16_t limit_battery_voltage;
-    uint16_t time_to_next_update_accelerometer;
-    uint16_t time_to_next_update_barometer;
-    uint16_t time_to_next_update_magnetometer;
-    uint16_t time_to_next_update_average_accelerometer;
-    uint16_t time_to_next_update_average_barometer;
-    uint16_t time_to_next_update_average_magnetometer;
-    uint16_t time_to_next_report_accelerometer;
-    uint16_t time_to_next_report_barometer;
-    uint16_t time_to_next_report_magnetometer;
-    uint16_t time_to_next_read_battery_voltage;
     uint16_t panic_timeout_outbound;
     uint16_t panic_timeout_inbound;
     uint16_t buzzer_frequency;
     uint8_t servo_safe;
     uint8_t servo_release;
-} sconfig;
+    uint16_t servo_hold;
+} t_configurables;
 
-Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(24680);
-Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
-Adafruit_ADXL345_Unified acc = Adafruit_ADXL345_Unified(13579);
+typedef struct
+{
+    uint32_t millis_previous_loop;
+    uint16_t time_to_next_update_accelerometer;
+    uint16_t time_to_next_update_barometer;
+    uint16_t time_to_next_update_magnetometer;
+    uint16_t time_to_next_read_battery_voltage;
+    uint16_t time_to_servo_stop_hold;
+} t_dynamic_config;
+
+
+typedef struct {
+    t_dynamic_config dynamic;
+    t_configurables configurable;
+} t_config;
+
+Adafruit_BMP280 bmp;
+MPU9250_asukiaaa mpu;
 
 Servo parachuteReleaseServo;
 
-char cmdline[COMMAND_LINE_BUFFER_SIZE] = { 0 };
-uint8_t cmdlength = 0;
+uint8_t cmdline[COMMAND_LINE_BUFFER_SIZE] = { 0 };
 
-sconfig configuration = {
-    0,      // millis_previous_loop
-    2,      // interval_read_accelerometer
-    50,     // interval_read_barometer
-    50,     // interval_read_magnetometer
-    10,     // interval_average_accelerometer
-    50,     // interval_average_barometer
-    500,    // interval_average_magnetometer
-    10,     // interval_print_accelerometer
-    50,     // interval_print_barometer
-    500,    // interval_print_magnetometer
-    5000,   // interval_check_battery
-    20,    // limit_delta_accelerometer
-    10,     // limit_delta_barometer
-    60,     // limit_delta_magnetometer
-    730,    // limit_battery_voltage
-    0,      // time_to_next_update_accelerometer
-    0,      // time_to_next_update_barometer
-    0,      // time_to_next_update_magnetometer
-    0,      // time_to_next_update_average_accelerometer
-    0,      // time_to_next_update_average_barometer
-    0,      // time_to_next_update_average_magnetometer
-    0,      // time_to_next_report_accelerometer
-    0,      // time_to_next_report_barometer
-    0,      // time_to_next_report_magnetometer
-    0,      // time_to_next_read_battery_voltage
-    3000,   // panic_timeout_outbound
-    15000,   // panic_timeout_inbound
-    4000,    // buzzer_frequency
-    45,     // servo_safe
-    0       // servo_release
-};
+t_config configuration = { 0 };
 
-savg valsBarometer         = {};
-savg valsAccelerometer     = {};
-savg valsMagnetometer      = {};
+t_msg_barometer     valsBarometer       = { 0 };
+t_msg_accelerometer valsAccelerometer   = { 0 };
+t_msg_magnetometer  valsMagnetometer    = { 0 };
+t_msg_debug         valsBattery         = { 0 };
 
-byte stateMachineState = STATE_GROUND_IDLE;
+uint8_t stateMachineState = STATE_GROUND_IDLE;
 
-float peakAltitudePressure = -1.0;
-float groundStationPressure = -1.0;
+//float peakAltitudePressure = -1.0;
+//float groundStationPressure = -1.0;
 float unarmedMagnetometerMagnitude = -1.0;
-float groundStationAccelerationMagnitude = -1.0;
-float peakLaunchAverageAccelerationMagnitude = -1.0;
+uint8_t unarmedMagnetometerReadings = AVERAGING_COUNT; // decrease to 0 before evaluating for arming
+//float groundStationAccelerationMagnitude = -1.0;
+//float peakLaunchAccelerationMagnitude = -1.0;
 
 // How many consequitive positive barometer deltas to read in a row to say we're
 //   steadily falling
@@ -159,6 +245,39 @@ uint8_t barometerdeltastrikes = 3;
 uint8_t panicActivate = 0;
 int32_t panicTimer = -1;
 
+RF24 radio(PIN_RADIO_A, PIN_RADIO_B);
+const uint64_t pipes[2] = {
+    0xABCDABCD71LL,         // Ground-to-air pipe (Read)
+    0x544d52687CLL          // Air-to-ground pipe (Write)
+};
+
+void setDefaultConfig()
+{
+    // Configurable part of configuration
+    configuration.configurable.interval_read_accelerometer          =     2;
+    configuration.configurable.interval_read_barometer              =    50;
+    configuration.configurable.interval_read_magnetometer           =    50;
+    configuration.configurable.interval_read_battery                = 30000; // Battery only needs checking every 30 seconds.
+    configuration.configurable.limit_delta_accelerometer            =    20;
+    configuration.configurable.limit_delta_barometer                =    10;
+    configuration.configurable.limit_delta_magnetometer             =    60;
+    configuration.configurable.limit_battery_voltage                =   730;
+    configuration.configurable.panic_timeout_outbound               =   300;
+    configuration.configurable.panic_timeout_inbound                =   150;
+    configuration.configurable.buzzer_frequency                     =   400;
+    configuration.configurable.servo_safe                           =    45;
+    configuration.configurable.servo_release                        =     0;
+    configuration.configurable.servo_hold                           =   250;
+    
+    // Dynamic part of configuration
+    configuration.dynamic.millis_previous_loop                      =     0,
+    configuration.dynamic.time_to_next_update_accelerometer         =     0;
+    configuration.dynamic.time_to_next_update_barometer             =     0;
+    configuration.dynamic.time_to_next_update_magnetometer          =     0;
+    configuration.dynamic.time_to_next_read_battery_voltage         =     0;
+    configuration.dynamic.time_to_servo_stop_hold                   =     0;
+}
+
 void clearCommandBuffer()
 {
     uint8_t cmdlength = 0;
@@ -167,25 +286,6 @@ void clearCommandBuffer()
     {
         cmdline[cmdlength-1] = '\0';
     }
-}
-
-uint8_t append32(savg *vals, float value)
-{
-    vals->values[vals->next_element_to_fill] = value;
-    
-    vals->next_element_to_fill++;
-    if(vals->next_element_to_fill >= SENSORS_NUM_VALUES)
-    {
-        vals->next_element_to_fill -= SENSORS_NUM_VALUES;
-    }
-    
-    if(vals->filled_elements < SENSORS_NUM_VALUES)
-    {
-        vals->filled_elements++;
-    }
-    
-
-    return vals->filled_elements;
 }
 
 float vlen3D(float x, float y, float z)
@@ -199,113 +299,44 @@ float vlen3D(float x, float y, float z)
     );
 }
 
-float favg32(savg *vals)
+bool sensorBarometerReadValue()
 {
-    uint8_t i = 0;
-    float sum = 0;
-    float avg = 0;
-
-    // Catch the first call.
-    if(vals->filled_elements == 0)
-    {
-        return 0;
-    }
-
-    for(i = 0; i < vals->filled_elements; i++)
-    {
-        sum += vals->values[i];
-    }
-
-    avg = sum / vals->filled_elements;
-
-    vals->prev_average = vals->average;
-    vals->average = avg;
-
-    return avg;
-
+    valsBarometer.abs_pressure = bmp.readPressure();
+    valsBarometer.temperature = bmp.readTemperature();
+    return true;
 }
 
-float sensorBarometerReadValue(uint8_t report)
+bool sensorAccelerometerReadValue()
 {
-    sensors_event_t event;
-    float val = 0.0;
-
-    bmp.getEvent(&event);
-
-    if(event.pressure)
+    if (mpu.accelUpdate() == 0)
     {
-        val = event.pressure * 100.0;
-    }
-    
-    if(report)
-    {
-        Serial.print("B: ");
-        Serial.println(val);
-    }
-    
-    return val;
-}
-
-float sensorAccelerometerReadValue(uint8_t report)
-{
-    sensors_event_t event;
-
-    acc.getEvent(&event);
-
-    if(event.acceleration.x || event.acceleration.y || event.acceleration.z)
-    {
-        if(report)
-        {
-            Serial.print("A: ");
-            Serial.print("[");
-            Serial.print(event.acceleration.x);
-            Serial.print(", ");
-            Serial.print(event.acceleration.y);
-            Serial.print(",  ");
-            Serial.print(event.acceleration.z);
-            Serial.println("]");
-        }
-        return vlen3D(event.acceleration.x, event.acceleration.y, event.acceleration.z);
+        valsAccelerometer.vector.x = mpu.accelX();
+        valsAccelerometer.vector.y = mpu.accelY();
+        valsAccelerometer.vector.z = mpu.accelZ();
+        valsAccelerometer.vector.magnitude = mpu.accelSqrt();
+        return true;
     }
     else
     {
-        if(report)
-        {
-            Serial.print("ERROR");
-        }
-        return 0.0;
+        return false;
     }
 }
 
-float sensorMagnetometerReadValue(uint8_t report)
+bool sensorMagnetometerReadValue()
 {
-    sensors_event_t event; 
-    mag.getEvent(&event);
-
-    if(event.magnetic.x || event.magnetic.y || event.magnetic.z)
+    if (mpu.magUpdate() == 0)
     {
-        if(report)
-        {
-            Serial.print("M: ");
-            Serial.print("[");
-            Serial.print(event.magnetic.x);
-            Serial.print(", ");
-            Serial.print(event.magnetic.y);
-            Serial.print(",  ");
-            Serial.print(event.magnetic.z);
-            Serial.println("]");
-        }
-        return vlen3D(event.magnetic.x, event.magnetic.y, event.magnetic.z);
+        valsMagnetometer.vector.x = mpu.magX();
+        valsMagnetometer.vector.y = mpu.magY();
+        valsMagnetometer.vector.z = mpu.magZ();
+        valsMagnetometer.vector.magnitude = vlen3D(valsMagnetometer.vector.x, valsMagnetometer.vector.y, valsMagnetometer.vector.z);
+        valsMagnetometer.heading = (uint16_t)((mpu.magHorizDirection() * 100) + 0.5); // +0.5 for rounding of float to uint conversion instead of cropping
+        return true;
     }
     else
     {
-        if(report)
-        {
-            Serial.print("ERROR");
-        }
-        return 0;
+        return false;
     }
-    
 }
 
 uint8_t getInt16(uint16_t *num, uint8_t start, uint8_t stop)
@@ -326,580 +357,435 @@ uint8_t getInt16(uint16_t *num, uint8_t start, uint8_t stop)
     return start;
 }
 
-uint8_t parseCommandConfiguration(uint8_t j, uint8_t len)
+void sendError(uint32_t code)
 {
-    uint8_t i = 0;
-    uint16_t val = 0;
+    t_msg_debug* msg = (t_msg_debug*)&cmdline[0];
+    clearMessage();
 
-    if(j == len)
-    {
-        Serial.println("Dumping configuration!");
-        
-        //Serial.print("interval_read_accelerometer: ");
-        Serial.println(configuration.interval_read_accelerometer);
-        
-        //Serial.print("interval_read_barometer: ");
-        Serial.println(configuration.interval_read_barometer);
-        
-        //Serial.print("interval_read_magnetometer: ");
-        Serial.println(configuration.interval_read_magnetometer);
-        
-        //Serial.print("interval_average_accelerometer: ");
-        Serial.println(configuration.interval_average_accelerometer);
-        
-        //Serial.print("interval_average_barometer: ");
-        Serial.println(configuration.interval_average_barometer);
-        
-        //Serial.print("interval_average_magnetometer: ");
-        Serial.println(configuration.interval_average_magnetometer);
-        
-        //Serial.print("interval_print_accelerometer: ");
-        Serial.println(configuration.interval_print_accelerometer);
-        
-        //Serial.print("interval_print_barometer: ");
-        Serial.println(configuration.interval_print_barometer);
-        
-        //Serial.print("interval_print_barometer: ");
-        Serial.println(configuration.interval_print_magnetometer);
-        
-        //Serial.print("panic_timeout_outbound: ");
-        Serial.println(configuration.interval_check_battery);
-        
-        //Serial.print("limit_delta_accelerometer: ");
-        Serial.println(configuration.limit_delta_accelerometer);
-        
-        //Serial.print("limit_delta_barometer: ");
-        Serial.println(configuration.limit_delta_barometer);
-        
-        //Serial.print("limit_delta_magnetometer: ");
-        Serial.println(configuration.limit_delta_magnetometer);
-        
-        //Serial.print("panic_timeout_outbound: ");
-        Serial.println(configuration.limit_battery_voltage);
+    // Send an error telegram with error code
 
-        //Serial.print("panic_timeout_outbound: ");
-        Serial.println(configuration.panic_timeout_outbound);
-        
-        //Serial.print("panic_timeout_inbound: ");
-        Serial.println(configuration.panic_timeout_inbound);
-        
-        //Serial.print("buzzer_frequency: ");
-        Serial.println(configuration.buzzer_frequency);
-        
-        //Serial.print("servo_safe: ");
-        Serial.println(configuration.servo_safe);
-        
-        //Serial.print("servo_release: ");
-        Serial.println(configuration.servo_release);
-        
-        return j;
-    }
-
-    switch(cmdline[j++])
-    {
-        case 'B': // Buzzer frequency
-        {
-            i = getInt16(&val, j, len);
-            if(i)
-            {
-                configuration.buzzer_frequency = val;
-            }
-            return i;
-            break;
-        }
-
-        case 'I': // Intervals
-        {
-            switch(cmdline[j++])
-            {
-                case 'A': // Accelerometer
-                {
-                    switch(cmdline[j++])
-                    {
-                        case 'A': // Averaging
-                        {
-                            i = getInt16(&val, j, len);
-                            if(i)
-                            {
-                                configuration.interval_average_accelerometer = val;
-                            }
-                            return i;
-                            break;
-                        }
-
-                        case 'P': // Printing
-                        {
-                            i = getInt16(&val, j, len);
-                            if(i)
-                            {
-                                configuration.interval_print_accelerometer = val;
-                            }
-                            return i;
-                            break;
-                        }
-
-                        case 'R': // Read
-                        {
-                            i = getInt16(&val, j, len);
-                            if(i)
-                            {
-                                configuration.interval_read_accelerometer = val;
-                            }
-                            return i;
-                            break;
-                        }
-                    }
-                    break;
-                }
-
-                case 'B': // Barometer
-                {
-                    switch(cmdline[j++])
-                    {
-                        case 'A': // Averaging
-                        {
-                            i = getInt16(&val, j, len);
-                            if(i)
-                            {
-                                configuration.interval_average_barometer = val;
-                            }
-                            return i;
-                            break;
-                        }
-
-                        case 'P': // Printing
-                        {
-                            i = getInt16(&val, j, len);
-                            if(i)
-                            {
-                                configuration.interval_print_barometer = val;
-                            }
-                            return i;
-                            break;
-                        }
-
-                        case 'R': // Read
-                        {
-                            i = getInt16(&val, j, len);
-                            if(i)
-                            {
-                                configuration.interval_read_barometer = val;
-                            }
-                            return i;
-                            break;
-                        }
-                    }
-                    break;
-                }
-
-                case 'M': // Magnetometer
-                {
-                    switch(cmdline[j++])
-                    {
-                        case 'A': // Averaging
-                        {
-                            i = getInt16(&val, j, len);
-                            if(i)
-                            {
-                                configuration.interval_average_magnetometer = val;
-                            }
-                            return i;
-                            break;
-                        }
-
-                        case 'P': // Printing
-                        {
-                            i = getInt16(&val, j, len);
-                            if(i)
-                            {
-                                configuration.interval_print_magnetometer = val;
-                            }
-                            return i;
-                            break;
-                        }
-
-                        case 'R': // Read
-                        {
-                            i = getInt16(&val, j, len);
-                            if(i)
-                            {
-                                configuration.interval_read_magnetometer = val;
-                            }
-                            return i;
-                            break;
-                        }
-                    }
-                    break;
-                }
-                
-                case 'V': // Battery Voltage
-                {
-                    i = getInt16(&val, j, len);
-                    if(i)
-                    {
-                        configuration.interval_check_battery = val;
-                    }
-                    return i;
-                    break;
-                }
-
-                default:
-                    break;
-            }
-            break;
-        }
-        
-        case 'L': // Limits
-        {
-            //Serial.println("Limits");
-
-            switch(cmdline[j++])
-            {
-                case 'A': // Accelerometer
-                {
-                    //Serial.println("Accelerometer");
-
-                    i = getInt16(&val, j, len);
-                    if(i)
-                    {
-                        configuration.limit_delta_accelerometer = val;
-                    }
-                    return i;
-                    break;
-                }
-
-                case 'B': // Barometer
-                {
-                    i = getInt16(&val, j, len);
-                    if(i)
-                    {
-                        configuration.limit_delta_barometer = val;
-                    }
-                    return i;
-                    break;
-                }
-
-                case 'M': // Magnetometer
-                {
-                    i = getInt16(&val, j, len);
-                    if(i)
-                    {
-                        configuration.limit_delta_magnetometer = val;
-                    }
-                    return i;
-                    break;
-                }
-
-                case 'V': // Battery Voltage
-                {
-                    i = getInt16(&val, j, len);
-                    if(i)
-                    {
-                        configuration.limit_battery_voltage = val;
-                    }
-                    return i;
-                    break;
-                }
-
-                default:
-                    break;
-            }
-            break;
-        }
-
-        case 'S': // Servo
-        {
-            switch(cmdline[j++])
-            {
-                case 'R': // Release
-                {
-                    i = getInt16(&val, j, len);
-                    if(i)
-                    {
-                        configuration.servo_release = val;
-                    }
-                    return i;
-                    break;
-                }
-
-                case 'S': // Safe
-                {
-                    i = getInt16(&val, j, len);
-                    if(i)
-                    {
-                        configuration.servo_safe = val;
-                    }
-                    return i;
-                    break;
-                }
-            }
-            break;
+    msg->header.id_full = CMD_ERROR;
+    msg->header.millis = millis();
+    msg->header.state = stateMachineState;
+    msg->payload.code = code;
+    msg->payload.value = 0;
+    //RF.sendsendMsg(&cmdline[0], sizeof(t_msg_debug));
 
 
-        }
-        
-        case 'T': // Timeouts
-        {
-            //Serial.println("Timeouts");
-            switch(cmdline[j++])
-            {
-                case 'I': // Inbound
-                {
-                    i = getInt16(&val, j, len);
-                    if(i)
-                    {
-                        configuration.panic_timeout_inbound = val;
-                    }
-                    return i;
-                    break;
-                }
-
-                case 'O': // Outbound
-                {
-                    i = getInt16(&val, j, len);
-                    if(i)
-                    {
-                        configuration.panic_timeout_outbound = val;
-                    }
-                    return i;
-                    break;
-                }
-
-                default:
-                    break;
-            }
-            break;
-        }
-        
-        default:
-            break;
-    }
-
-    return j;
 }
 
-/** Remove all characters in array up to the specified character.
- * @param   i   The last character to remove (eg. linefeed).
- */
-void stripCommand(uint8_t i)
+void reportConfig(uint8_t *message, uint8_t len)
 {
-    uint8_t j = 0;
+    t_msg_debug *msg = (t_msg_debug*)message;
+    t_msg_debug *buffer = (t_msg_debug*)cmdline[0];
+    uint8_t outlen = sizeof(t_msg_config);
     
-    if(i == 0)
+    clearMessage();
+    
+    buffer->header.millis = millis();
+    buffer->header.id_full = (CMD_CONFIG << 8) & stateMachineState;
+    
+    switch(msg->payload.value)
     {
+        case CONFIG_INTERVAL_READ_ACCELEROMETER:
+        {
+            buffer->payload.code = CONFIG_INTERVAL_READ_ACCELEROMETER;
+            buffer->payload.value = configuration.configurable.interval_read_accelerometer;
+            break;
+        }
+        
+        case CONFIG_INTERVAL_READ_BAROMETER:
+        {
+            buffer->payload.code = CONFIG_INTERVAL_READ_BAROMETER;
+            buffer->payload.value = configuration.configurable.interval_read_barometer;
+            break;
+        }
+        
+        case CONFIG_INTERVAL_READ_MAGNETOMETER:
+        {
+            buffer->payload.code = CONFIG_INTERVAL_READ_MAGNETOMETER;
+            buffer->payload.value = configuration.configurable.interval_read_magnetometer;
+            break;
+        }
+        
+        case CONFIG_INTERVAL_READ_BATTERY:
+        {
+            buffer->payload.code = CONFIG_INTERVAL_READ_BATTERY;
+            buffer->payload.value = configuration.configurable.interval_read_battery;
+            break;
+        }
+        
+        case CONFIG_LIMIT_DELTA_ACCELEROMETER:
+        {
+            buffer->payload.code = CONFIG_LIMIT_DELTA_ACCELEROMETER;
+            buffer->payload.value = configuration.configurable.limit_delta_accelerometer;
+            break;
+        }
+        
+        case CONFIG_LIMIT_DELTA_BAROMETER:
+        {
+            buffer->payload.code = CONFIG_LIMIT_DELTA_BAROMETER;
+            buffer->payload.value = configuration.configurable.limit_delta_barometer;
+            break;
+        }
+        
+        case CONFIG_LIMIT_DELTA_MAGNETOMETER:
+        {
+            buffer->payload.code = CONFIG_LIMIT_DELTA_MAGNETOMETER;
+            buffer->payload.value = configuration.configurable.limit_delta_magnetometer;
+            break;
+        }
+        
+        case CONFIG_LIMIT_BATTERY_VOLTAGE:
+        {
+            buffer->payload.code = CONFIG_LIMIT_BATTERY_VOLTAGE;
+            buffer->payload.value = configuration.configurable.limit_battery_voltage;
+            break;
+        }
+        
+        case CONFIG_TIMEOUT_PANIC_OUTBOUND:
+        {
+            buffer->payload.code = CONFIG_TIMEOUT_PANIC_OUTBOUND;
+            buffer->payload.value = configuration.configurable.panic_timeout_outbound;
+            break;
+        }
+        
+        case CONFIG_TIMEOUT_PANIC_INBOUND:
+        {
+            buffer->payload.code = CONFIG_TIMEOUT_PANIC_INBOUND;
+            buffer->payload.value = configuration.configurable.panic_timeout_inbound;
+            break;
+        }
+        
+        case CONFIG_BUZZER_FREQUENCY:
+        {
+            buffer->payload.code = CONFIG_BUZZER_FREQUENCY;
+            buffer->payload.value = configuration.configurable.buzzer_frequency;
+            break;
+        }
+        
+        case CONFIG_SERVO_SAFE:
+        {
+            buffer->payload.code = CONFIG_SERVO_SAFE;
+            buffer->payload.value = configuration.configurable.servo_safe;
+            break;
+        }
+        
+        case CONFIG_SERVO_RELEASE:
+        {
+            buffer->payload.code = CONFIG_SERVO_RELEASE;
+            buffer->payload.value = configuration.configurable.servo_release;
+            break;
+        }
+        
+        case CONFIG_SERVO_HOLD:
+        {
+            buffer->payload.code = CONFIG_SERVO_HOLD;
+            buffer->payload.value = configuration.configurable.servo_hold;
+            break;
+        }
+
+        default:
+        {
+            Serial.print("reportConfig(): Invalid config code (");
+            Serial.print(msg->payload.value);
+            Serial.println(")");
+            sendError(ERROR_INVALID_CONFIG);
+            break;
+        }
+    }
+
+    sendMsg((uint8_t *)buffer, outlen);
+}
+
+void reportSensor(uint8_t sensor)
+{
+    uint8_t *buffer = NULL;
+    uint8_t len = 0;
+    
+    switch (sensor)
+    {
+        // Accelerometer
+        case SENSOR_TYPE_ACCELEROMETER:
+        {
+            buffer = (uint8_t*)&valsAccelerometer;
+            len = sizeof(valsAccelerometer);
+            break;
+        }
+
+        // Barometer (incl. temperature!)
+        case SENSOR_TYPE_PRESSURE:
+        {
+            buffer = (uint8_t*)&valsBarometer;
+            len = sizeof(valsBarometer);
+            break;
+        }
+
+        // Magnetometer
+        case SENSOR_TYPE_MAGNETIC_FIELD:
+        {
+            buffer = (uint8_t*)&valsMagnetometer;
+            len = sizeof(valsMagnetometer);
+            break;
+        }
+
+        // Voltage
+        case SENSOR_TYPE_VOLTAGE:
+        {
+            buffer = (uint8_t*)&valsBattery;
+            len = sizeof(valsBattery);
+            break;
+        }
+
+        default:
+        {
+            sendError(ERROR_INVALID_COMMAND);
+            return;
+            break;
+        }
+    }
+
+    sendMsg(buffer, len);
+}
+
+void sendMsg(uint8_t *buffer, uint8_t len)
+{
+    radio.stopListening();
+    if (!radio.write(buffer, len))
+    {
+        sendError(ERROR_SEND_FAILED);
+    }
+
+    // Rf.write(buffer, len);
+}
+
+void reportState()
+{
+    t_msg_debug* msg = (t_msg_debug*)&cmdline[0];
+    clearMessage();
+
+    // Send CMD_STATE with current state
+
+    msg->header.id_full = CMD_STATE;
+    msg->header.millis = millis();
+    msg->header.state = stateMachineState;
+    msg->payload.code = STATE_REPORT;
+    msg->payload.value = stateMachineState;
+    //rf.sendMsg(&cmdline[0], sizeof(t_msg_debug));
+}
+
+void parseCommandConfiguration(uint8_t* message, uint8_t len)
+{
+    if(len < sizeof(t_msg_debug))
+    {
+        sendError(ERROR_MESSAGE_LENGTH);
         return;
     }
 
-    if(i > COMMAND_LINE_BUFFER_SIZE)
+    t_msg_debug *msg = (t_msg_debug*)message;
+    
+    switch(msg->payload.code)
     {
-        // This is an error, but we "solve" it by clearing the whole buffer.
-        i = COMMAND_LINE_BUFFER_SIZE;
-    }
-    else
-    {
-        // Shift the rest of the command buffer i characters to the left
-        for(j = 0; j < COMMAND_LINE_BUFFER_SIZE; j++)
+        case CONFIG_REPORT:
         {
-            if(j < COMMAND_LINE_BUFFER_SIZE - (i + 1))
-            {
-                cmdline[j] = cmdline[j + i];
-            }
-            else
-            {
-                cmdline[j] = '\0';
-            }
-            
+            reportConfig(message, len);
+            break;
+        }
+
+        case CONFIG_INTERVAL_READ_ACCELEROMETER:
+        {
+            configuration.configurable.interval_read_accelerometer = (uint16_t)msg->payload.value;
+            break;
+        }
+
+        case CONFIG_INTERVAL_READ_BAROMETER:
+        {
+            configuration.configurable.interval_read_barometer = (uint16_t)msg->payload.value;
+            break;
+        }
+
+        case CONFIG_INTERVAL_READ_MAGNETOMETER:
+        {
+            configuration.configurable.interval_read_magnetometer = (uint16_t)msg->payload.value;
+            break;
+        }
+
+        case CONFIG_INTERVAL_READ_BATTERY:
+        {
+            configuration.configurable.interval_read_battery = (uint16_t)msg->payload.value;
+            break;
+        }
+
+        case CONFIG_LIMIT_DELTA_ACCELEROMETER:
+        {
+            configuration.configurable.limit_delta_accelerometer = (uint16_t)msg->payload.value;
+            break;
+        }
+
+        case CONFIG_LIMIT_DELTA_BAROMETER:
+        {
+            configuration.configurable.limit_delta_barometer = (uint16_t)msg->payload.value;
+            break;
+        }
+
+        case CONFIG_LIMIT_DELTA_MAGNETOMETER:
+        {
+            configuration.configurable.limit_delta_magnetometer = (uint16_t)msg->payload.value;
+            break;
+        }
+
+        case CONFIG_LIMIT_BATTERY_VOLTAGE:
+        {
+            configuration.configurable.limit_battery_voltage = (uint16_t)msg->payload.value;
+            break;
+        }
+
+        case CONFIG_TIMEOUT_PANIC_OUTBOUND:
+        {
+            configuration.configurable.panic_timeout_outbound = (uint16_t)msg->payload.value;
+            break;
+        }
+
+        case CONFIG_TIMEOUT_PANIC_INBOUND:
+        {
+            configuration.configurable.panic_timeout_inbound = (uint16_t)msg->payload.value;
+            break;
+        }
+        
+        case CONFIG_BUZZER_FREQUENCY:
+        {
+            configuration.configurable.buzzer_frequency = (uint16_t)msg->payload.value;
+            break;
+        }
+
+        case CONFIG_SERVO_SAFE:
+        {
+            configuration.configurable.servo_safe = (uint8_t)msg->payload.value;
+            break;
+        }
+
+        case CONFIG_SERVO_RELEASE:
+        {
+            configuration.configurable.servo_release = (uint8_t)msg->payload.value;
+            break;
+        }
+
+        case CONFIG_SERVO_HOLD:
+        {
+            configuration.configurable.servo_hold = (uint16_t)msg->payload.value;
+            break;
+        }
+
+        default:
+        {
+            sendError(ERROR_INVALID_CONFIG);
+            break;
+        }
+    }
+}
+
+void parseCommandState(uint8_t* message, uint8_t len)
+{
+    if(len < sizeof(t_msg_debug))
+    {
+        sendError(ERROR_MESSAGE_LENGTH);
+        return;
+    }
+
+    t_msg_debug *msg = (t_msg_debug*)message;
+
+    switch(msg->payload.code)
+    {
+        case STATE_REPORT:
+        {
+            reportState();
+            break;
+        }
+
+        case STATE_CHANGE:
+        {
+            setState((uint8_t)msg->payload.value);
+            break;
+        }
+
+        default:
+        {
+            sendError(ERROR_INVALID_COMMAND);
+            break;
         }
     }
     
-    // Decrement length counter
-    if(i > cmdlength)
-    {
-        cmdlength = 0;
-    }
-    else
-    {
-        cmdlength -= i;
-    }
-
-    /*
-    Serial.print("Command string: [");
-    Serial.flush();
-    for(j = 0; j < COMMAND_LINE_BUFFER_SIZE; j++)
-    {
-        Serial.print(cmdline[j] > 20 ? cmdline[j] : '.');
-        Serial.flush();
-    }
-    Serial.println("]");
-    Serial.flush();
-    */
 }
 
-uint8_t parseCommand(void)
+void clearMessage()
 {
     uint8_t i = 0;
-    uint8_t j = 0;
-    
-    // Find the first newline
-    for(i = 0; i <= cmdlength; i++)
+    for(i = 0; i < COMMAND_LINE_BUFFER_SIZE; i++)
     {
-        if(cmdline[i] == ';')
+        cmdline[i] = 0;
+    }
+}
+
+void pong()
+{
+    t_msg_header* buffer = (t_msg_header*)&cmdline[0];
+    uint8_t len = sizeof(t_msg_debug);
+    buffer->millis = millis();
+    buffer->id_full = (CMD_PINGPONG << 8) & stateMachineState;
+    sendMsg((uint8_t*)buffer, len);
+}
+
+bool parseMessage(uint8_t* message, uint8_t len)
+{
+    bool status = true;
+    t_msg_header *msg = (t_msg_header*)&cmdline[0];
+
+    if(len > COMMAND_LINE_BUFFER_SIZE)
+    {
+        sendError(ERROR_MESSAGE_LENGTH);
+    }
+
+    // Check the first three bytes of message for message type
+    uint32_t id = (msg->id_full & 0xFFFFFF00) >> 8;
+
+    switch (id)
+    {
+        case CMD_PINGPONG:
         {
-            //Serial.print("Newline at position ");
-            //Serial.println(i);
-            //Serial.flush();
+            pong();
+            break;
+        }
+        
+        case CMD_STATE:
+        {
+            // change states
+            break;
+        }
+
+        case CMD_READ:
+        {
+            // read accelerometer (and report)
+            break;
+        }
+        
+
+        case CMD_CONFIG:
+        {
+            parseCommandConfiguration(message, len);
+            break;
+        }
+
+        default:
+        {
+            status = false;
             break;
         }
     }
 
-    if(i == 0)
-    {
-        return 1;
-    }
-
-    if(i > cmdlength)
-    {
-        //Serial.println("No newline found!");
-        //Serial.flush();
-        if(cmdlength <= COMMAND_LINE_APPEND_THRESHOLD)
-        {
-            // Not to worry, maybe a newline arrives shortly...
-            return 0;
-        }
-
-        // We're above threshold for reading in new bytes,
-        //   and there is no newline in our buffer!
-        if(cmdlength > COMMAND_LINE_APPEND_THRESHOLD)
-        {
-            // Start shifting bytes to the left in search of a command
-            return 1;
-        }
-    }
-
-    if(i > 0)
-    {
-        // It can theoretically be a command at only 2 bytes ("P\n")
-        switch(cmdline[j++])
-        {
-            Serial.print(millis());
-            Serial.print(": ");
-
-            case 'C': // Configuration
-            {
-                //Serial.print("Configuration command ");
-                if(
-                    (stateMachineState == STATE_GROUND_IDLE)
-                    ||
-                    (stateMachineState == STATE_GROUND_IDLE_ON_PAD)
-                    ||
-                    (stateMachineState == STATE_GROUND_RECOVERY)
-                )
-                {
-                    //Serial.println("input");
-                    j = parseCommandConfiguration(j, i);
-                    if(j < i)
-                    {
-                        clearCommandBuffer();
-                        //Serial.println("There were leftover characters!");
-                    }
-                    return j;
-                }
-                else
-                {
-                    //Serial.println("in wrong mode!");
-                    // Ignore the command
-                    return i;
-                }
-                break;
-            }
-
-            case 'D': // Debug
-            {
-                Serial.println("----- DEBUG -----");
-                
-                Serial.print("Current state is S");
-                Serial.println(stateMachineState);
-                Serial.print("System time is ");
-                Serial.println(millis());
-                Serial.print("Command buffer length: ");
-                Serial.println(cmdlength);
-                
-                //sensorBarometerReadTemperature();
-                
-                Serial.print("Current Accelerometer value: ");
-                Serial.println(sensorAccelerometerReadValue(1));
-
-                Serial.print("Current Barometer value: ");
-                Serial.println(sensorBarometerReadValue(1));
-
-                Serial.print("Current Magnetometer value: ");
-                Serial.println(sensorMagnetometerReadValue(1));
-
-                doBarometerActions(0, ((1 << STATUS_REPORT)|(1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)), 1);
-                
-                doAccelerometerActions(0, ((1 << STATUS_REPORT)|(1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)), 1);
-                
-                doMagnetometerActions(0, ((1 << STATUS_REPORT)|(1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)), 1);
-
-                Serial.print("Current buzzer frequency is ");
-                Serial.print(configuration.buzzer_frequency);
-                Serial.println(" Hz");
-
-                Serial.print("Peak altitude pressure: ");
-                Serial.println(peakAltitudePressure);
-
-
-                return i;
-                break;
-            }
-
-            case 'P': // Ping
-            {
-                Serial.println("P");
-                return i;
-                break;
-            }
-            
-            case 'S': // State transition
-            {
-                if(j == i)
-                {
-                    // Report current state
-                    Serial.print("S");
-                    Serial.println(stateMachineState);
-                    return i;
-                }
-
-                //Serial.print("State change ");
-                j = (uint8_t)cmdline[j++] - 0x30;
-                if(j > STATE_MAX_STATE)
-                {
-                    // Error!
-                    Serial.println("error!");
-                    return i;
-                    break;
-                }
-                //Serial.print("from S");
-                //Serial.print(stateMachineState);
-                //Serial.print(" to S");
-                //Serial.println(j);
-                setState(j);
-                return i;
-                break;
-            }
-            
-            default:
-            {
-                //Serial.println("E: Command not recognized.");
-                Serial.println("E");
-                return i;
-                break;
-            }
-        } // switch(cmdline[0])
-    } // if(i > 1)
-
-    return 0;
-} // parseCommand()
+    clearMessage();
+    return status;
+    
+}
 
 void displaySensorDetails(uint8_t sensorStatus)
 {
@@ -915,306 +801,134 @@ void displaySensorDetails(uint8_t sensorStatus)
         GET_BIT(sensorStatus, STATUS_ACCELEROMETER_DETECTED)
     ))
     {
-        Serial.println("E: At least one sensor not detected.");
+        sendError(ERROR_DEVICE_NOT_FOUND);
+        //Serial.println("E: At least one sensor not detected.");
     }
 }
 
-uint8_t doAccelerometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
+uint8_t doAccelerometerActions(uint16_t delta_millis, uint8_t force)
 {
     uint8_t update = 0;
-    int32_t diff = 0;
+    bool updated = false;
 
-    if(delta_millis >= configuration.time_to_next_update_average_accelerometer)
-    {
-        SET_BIT(update, STATUS_UPDATE_AVERAGE);
-        configuration.time_to_next_update_average_accelerometer = configuration.interval_average_accelerometer;
-    }
-    else {
-        CLEAR_BIT(update, STATUS_UPDATE_AVERAGE);
-        configuration.time_to_next_update_average_accelerometer -= delta_millis;
-    }
-
-    if(GET_BIT(update, STATUS_UPDATE_AVERAGE) || GET_BIT(force, STATUS_UPDATE_AVERAGE))
-    {
-        //Serial.println();
-        //Serial.print(millis());
-        //Serial.println(": Aavg");
-        favg32(&valsAccelerometer);
-    }
-
-    if(delta_millis >= configuration.time_to_next_report_accelerometer)
-    {
-        SET_BIT(update, STATUS_REPORT);
-        configuration.time_to_next_report_accelerometer = configuration.interval_print_accelerometer;
-    }
-    else
-    {
-        CLEAR_BIT(update, STATUS_REPORT);
-        configuration.time_to_next_report_accelerometer -= delta_millis;
-    }
-
-    if((report && GET_BIT(update, STATUS_REPORT)) || GET_BIT(force, STATUS_REPORT))
-    {
-        if(valsAccelerometer.filled_elements)
-        {
-            //Serial.println();
-            Serial.print(millis());
-            Serial.print("\tR\tA\t");
-
-            //Serial.print("Previous Average: ");
-            //Serial.print(valsAccelerometer.prev_average);
-            //Serial.print("\t");
-            //Serial.println(" m/s^2");
-
-            //Serial.print("Average: ");
-            Serial.print(valsAccelerometer.average);
-            Serial.print("\t");
-            //Serial.println(" m/s^2");
-
-            if(valsAccelerometer.prev_average > valsAccelerometer.average)
-            {
-                diff = -1 * (valsAccelerometer.prev_average - valsAccelerometer.average);
-            }
-            else
-            {
-                diff = valsAccelerometer.average - valsAccelerometer.prev_average;
-            }
-
-            //Serial.print("Delta: ");
-            Serial.print(diff);
-            Serial.println();
-            //Serial.println(" m/s^2");
-        }
-    }
-
-    if(delta_millis >= configuration.time_to_next_update_accelerometer)
+    if(delta_millis >= configuration.dynamic.time_to_next_update_accelerometer)
     {
         SET_BIT(update, STATUS_UPDATE);
-        configuration.time_to_next_update_accelerometer = configuration.interval_read_accelerometer;
+        configuration.dynamic.time_to_next_update_accelerometer = configuration.configurable.interval_read_accelerometer;
     }
     else {
         CLEAR_BIT(update, STATUS_UPDATE);
-        configuration.time_to_next_update_accelerometer -= delta_millis;
+        configuration.dynamic.time_to_next_update_accelerometer -= delta_millis;
     }
 
     if(GET_BIT(update, STATUS_UPDATE) || GET_BIT(force, STATUS_UPDATE))
     {
-        //Serial.println();
-        //Serial.print(millis());
-        //Serial.println(": Aapd");
-        append32(&valsAccelerometer, sensorAccelerometerReadValue(0));
+        updated = sensorAccelerometerReadValue();
+    }
+
+    if(updated)
+    {
+        reportSensor(SENSOR_TYPE_ACCELEROMETER);
     }
 
     return (update | force);
 }
 
-uint8_t doMagnetometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
+uint8_t doMagnetometerActions(uint16_t delta_millis, uint8_t force)
 {
     uint8_t update = 0;
-    int32_t diff = 0;
+    bool updated = false;
 
-    if(delta_millis >= configuration.time_to_next_update_average_magnetometer)
+    if(delta_millis >= configuration.dynamic.time_to_next_update_magnetometer)
     {
-        SET_BIT(update, STATUS_UPDATE_AVERAGE);
-        configuration.time_to_next_update_average_magnetometer = configuration.interval_average_magnetometer;
+        SET_BIT(update, STATUS_UPDATE);
+        configuration.dynamic.time_to_next_update_magnetometer = configuration.configurable.interval_read_magnetometer;
     }
     else {
-        CLEAR_BIT(update, STATUS_UPDATE_AVERAGE);
-        configuration.time_to_next_update_average_magnetometer -= delta_millis;
-    }
-
-    if(GET_BIT(update, STATUS_UPDATE_AVERAGE) | GET_BIT(force, STATUS_UPDATE_AVERAGE))
-    {
-        //Serial.println();
-        //Serial.print(millis());
-        //Serial.println(": Mavg");
-        favg32(&valsMagnetometer);
-    }
-
-    if(delta_millis >= configuration.time_to_next_report_magnetometer)
-    {
-        SET_BIT(update, STATUS_REPORT);
-        configuration.time_to_next_report_magnetometer = configuration.interval_print_magnetometer;
-    }
-    else {
-        CLEAR_BIT(update, STATUS_REPORT);
-        configuration.time_to_next_report_magnetometer -= delta_millis;
-    }
-
-    if((report && GET_BIT(update, STATUS_REPORT)) || GET_BIT(force, STATUS_REPORT))
-    {
-        if(valsMagnetometer.filled_elements)
-        {
-            //Serial.println();
-            Serial.print(millis());
-            Serial.print("\tR\tM\t");
-            //Serial.println(": Mrpt");
-
-            //Serial.print("Previous Average: ");
-            //Serial.print(valsMagnetometer.prev_average);
-            //Serial.print("\t");
-            //Serial.println(" uT");
-
-            //Serial.print("Average: ");
-            Serial.print(valsMagnetometer.average);
-            Serial.print("\t");
-            //Serial.println(" uT");
-
-            if(valsMagnetometer.prev_average > valsMagnetometer.average)
-            {
-                diff = -1 * (valsMagnetometer.prev_average - valsMagnetometer.average);
-            }
-            else
-            {
-                diff = valsMagnetometer.average - valsMagnetometer.prev_average;
-            }
-
-            //Serial.print("Delta: ");
-            Serial.print(diff);
-            Serial.println();
-            //Serial.println(" uT");
-    }
-    }
-
-    if(delta_millis >= configuration.time_to_next_update_magnetometer)
-    {
-        update = 1;
-        configuration.time_to_next_update_magnetometer = configuration.interval_read_magnetometer;
-    }
-    else {
-        update = 0;
-        configuration.time_to_next_update_magnetometer -= delta_millis;
+        CLEAR_BIT(update, STATUS_UPDATE);
+        configuration.dynamic.time_to_next_update_magnetometer -= delta_millis;
     }
 
     if(GET_BIT(update, STATUS_UPDATE) || GET_BIT(force, STATUS_UPDATE))
     {
-        //Serial.println();
-        //Serial.print(millis());
-        //Serial.println(": Mapd");
-        append32(&valsMagnetometer, sensorMagnetometerReadValue(0));
+        updated = sensorMagnetometerReadValue();
+    }
+
+    if(updated)
+    {
+        reportSensor(SENSOR_TYPE_MAGNETIC_FIELD);
     }
 
     return (update | force);
 }
 
-uint8_t doBarometerActions(uint16_t delta_millis, uint8_t force, uint8_t report)
+uint8_t doBarometerActions(uint16_t delta_millis, uint8_t force)
 {
     uint8_t update = 0;
-    int32_t diff = 0;
+    bool updated = false;
 
-    if(delta_millis >= configuration.time_to_next_update_average_barometer)
-    {
-        SET_BIT(update, STATUS_UPDATE_AVERAGE);
-        configuration.time_to_next_update_average_barometer = configuration.interval_average_barometer;
-    }
-    else {
-        CLEAR_BIT(update, STATUS_UPDATE_AVERAGE);
-        configuration.time_to_next_update_average_barometer -= delta_millis;
-    }
-
-    if(GET_BIT(update, STATUS_UPDATE_AVERAGE) || GET_BIT(force, STATUS_UPDATE_AVERAGE))
-    {
-        //Serial.println();
-        //Serial.print(millis());
-        //Serial.println(": Bavg");
-        favg32(&valsBarometer);
-    }
-
-    if(delta_millis >= configuration.time_to_next_report_barometer)
-    {
-        SET_BIT(update, STATUS_REPORT);
-        configuration.time_to_next_report_barometer = configuration.interval_print_barometer;
-    }
-    else {
-        CLEAR_BIT(update, STATUS_REPORT);
-        configuration.time_to_next_report_barometer -= delta_millis;
-    }
-
-    if((report && GET_BIT(update, STATUS_REPORT)) || GET_BIT(force, STATUS_REPORT))
-    {
-        if(valsBarometer.filled_elements)
-        {
-            //Serial.println();
-            Serial.print(millis());
-            Serial.print("\tR\tB\t");
-            //Serial.println(": Brpt");
-
-            //Serial.print("Previous Average: ");
-            //Serial.print(valsBarometer.prev_average);
-            //Serial.print("\t");
-            //Serial.println(" Pa");
-
-            //Serial.print("Average: ");
-            Serial.print(valsBarometer.average);
-            Serial.print("\t");
-            //Serial.println(" Pa");
-
-            diff = (valsBarometer.average - valsBarometer.prev_average);
-
-            //Serial.print("Delta: ");
-            Serial.print(diff);
-            Serial.println();
-            //Serial.println(" Pa");
-        }
-    }
-
-    if(delta_millis >= configuration.time_to_next_update_barometer)
+    if(delta_millis >= configuration.dynamic.time_to_next_update_barometer)
     {
         SET_BIT(update, STATUS_UPDATE);
-        configuration.time_to_next_update_barometer = configuration.interval_read_barometer;
+        configuration.dynamic.time_to_next_update_barometer = configuration.configurable.interval_read_barometer;
     }
     else {
         CLEAR_BIT(update, STATUS_UPDATE);
-        configuration.time_to_next_update_barometer -= delta_millis;
+        configuration.dynamic.time_to_next_update_barometer -= delta_millis;
     }
 
     if(GET_BIT(update, STATUS_UPDATE) || GET_BIT(force, STATUS_UPDATE))
     {
-        //Serial.println();
-        //Serial.print(millis());
-        //Serial.println(": Bapd");
-        append32(&valsBarometer, sensorBarometerReadValue(0));
+        sensorMagnetometerReadValue();
     }
+
+    if(updated)
+    {
+        reportSensor(SENSOR_TYPE_PRESSURE);
+    }
+    
+    return (update | force);
 }
 
-void doBatteryActions(uint16_t delta_millis)
+void doBatteryActions(uint16_t delta_millis, uint8_t force)
 {
     uint8_t update = 0;
     uint16_t voltage = 0;
+    bool updated = false;
     
-    if(delta_millis >= configuration.time_to_next_read_battery_voltage)
+    if(delta_millis >= configuration.dynamic.time_to_next_read_battery_voltage)
     {
-        update = 1;
-        configuration.time_to_next_read_battery_voltage = configuration.interval_check_battery;
+        SET_BIT(update, STATUS_UPDATE);
+        configuration.dynamic.time_to_next_read_battery_voltage = configuration.configurable.interval_read_battery;
     }
     else {
-        update = 0;
-        configuration.time_to_next_read_battery_voltage -= delta_millis;
+        CLEAR_BIT(update, STATUS_UPDATE);
+        configuration.dynamic.time_to_next_read_battery_voltage -= delta_millis;
     }
 
-    if(update)
+    if(GET_BIT(update, STATUS_UPDATE) || GET_BIT(force, STATUS_UPDATE))
     {
-        voltage = readBatteryVoltage();
-        Serial.print(millis());
-        Serial.print("\tR\tV\t");
-        Serial.print(voltage);
+        updated = true;
 
-        if(voltage < configuration.limit_battery_voltage)
+        readBatteryVoltage();
+        
+        if(valsBattery.payload.value < configuration.configurable.limit_battery_voltage)
         {
-            tone(BUZZER_PIN, 440, configuration.interval_check_battery/2);
-            Serial.print("\tBAT VOLT WARN");
+            sendError(ERROR_LOW_BATTERY_WARNING);
+            tone(PIN_BUZZER, 440, configuration.configurable.interval_read_battery/2);
         }
-        Serial.println();
     }
 
-
+    if(updated)
+    {
+        reportSensor(SENSOR_TYPE_VOLTAGE);
+    }
 }
 
-uint16_t readBatteryVoltage()
+void readBatteryVoltage()
 {
-    uint16_t adval = 0;
-    adval = analogRead(BATTERY_VOLTAGE_PIN);
-    return adval;
+    valsBattery.payload.value = (uint16_t)analogRead(PIN_BATTERY_VOLTAGE);
+    valsBattery.header.millis = millis();
 }
 
 void panicTimerCountdown(uint16_t delta)
@@ -1225,7 +939,7 @@ void panicTimerCountdown(uint16_t delta)
         if(panicTimer <= 0)
         {
             panicActivate = 1;
-            Serial.println("Panic timeout!");
+            sendError(ERROR_PANIC_TIMEOUT);
         }
     }
 }
@@ -1236,14 +950,16 @@ void panicTimerReset()
     {
         case STATE_AIRBORNE_INBOUND:
         {
-            panicTimer = configuration.panic_timeout_inbound;
+            panicTimer = configuration.configurable.panic_timeout_inbound;
             break;
         }
+
         case STATE_AIRBORNE_OUTBOUND:
         {
-            panicTimer = configuration.panic_timeout_outbound;
+            panicTimer = configuration.configurable.panic_timeout_outbound;
             break;
         }
+
         default:
         {
             panicTimer = 0;
@@ -1252,59 +968,79 @@ void panicTimerReset()
     panicActivate = 0;
 }
 
-void releaseTheKrakenshoot()
+uint8_t releaseTheKrakenshoot(uint16_t delta_millis)
 {
-    // Release the parachute by applying a different angle to the servo
-    // or applying power to a motor
-    // or something...
-    digitalWrite(SERVO_ENABLE_PIN, HIGH);
-
-    parachuteReleaseServo.write(configuration.servo_release);
-    delay(250);
-    digitalWrite(SERVO_ENABLE_PIN, LOW);
+    if(delta_millis < configuration.dynamic.time_to_servo_stop_hold)
+    {
+        digitalWrite(PIN_SERVO_ENABLE, HIGH);
+        parachuteReleaseServo.write(configuration.configurable.servo_release);
+        configuration.dynamic.time_to_servo_stop_hold -= delta_millis;
+        return 0;
+    }
+    else
+    {
+        digitalWrite(PIN_SERVO_ENABLE, LOW);
+        return 1;
+    }
 }
 
-void resetParachute()
+
+// Reset the parachute by enabling servo drive FET for a little while and setting the "safe" position. When time is up, disable servo drive FET to conserve that precious juice.
+uint8_t resetParachute(uint16_t delta_millis)
 {
-    digitalWrite(SERVO_ENABLE_PIN, HIGH);
-    parachuteReleaseServo.write(configuration.servo_safe);
-    delay(250);
-    digitalWrite(SERVO_ENABLE_PIN, LOW);
+    if(delta_millis < configuration.dynamic.time_to_servo_stop_hold)
+    {
+        digitalWrite(PIN_SERVO_ENABLE, HIGH);
+        parachuteReleaseServo.write(configuration.configurable.servo_safe);
+        configuration.dynamic.time_to_servo_stop_hold -= delta_millis;
+        return 0;
+    }
+    else
+    {
+        configuration.dynamic.time_to_servo_stop_hold = configuration.configurable.servo_hold;
+        digitalWrite(PIN_SERVO_ENABLE, LOW);
+        return 1;
+    }
 }
 
 
 void enableAudioVisualBeacon()
 {
     // Toggle power to audiovisual beacon
-    digitalWrite(BLINKER_PIN, HIGH);
-    tone(BUZZER_PIN, configuration.buzzer_frequency, 250);
+    digitalWrite(PIN_BLINKER, HIGH);
+    tone(PIN_BUZZER, configuration.configurable.buzzer_frequency, 250);
 }
 
 void disableAudioVisualBeacon()
 {
     // Toggle power to audiovisual beacon
-    digitalWrite(BLINKER_PIN, LOW);
+    digitalWrite(PIN_BLINKER, LOW);
     delay(25);
 }
 
 
 void setState(uint8_t newState)
 {
-    uint8_t set = STATE_GROUND_IDLE;
     uint16_t diff = 0;
-    
-    if(newState <= STATE_MAX_STATE)
+    t_msg_debug* msg = (t_msg_debug*)&cmdline[0];
+
+    if(newState >= STATE_NUM_STATES)
     {
-        set = newState;
+        sendError(ERROR_INVALID_STATE);
+        return;
     }
 
-    Serial.print(millis());
-    Serial.print(": S");
-    Serial.print(stateMachineState);
-    Serial.print(" -> S");
-    Serial.println(set);
+    clearMessage();
 
-    stateMachineState = set;
+    // Send CMD_STATE with current state
+    msg->header.id_full = CMD_STATE;
+    msg->header.millis = millis();
+    msg->header.state = stateMachineState;
+    msg->payload.code = STATE_REPORT;
+    msg->payload.value = newState;
+    sendMsg((uint8_t *)msg, sizeof(t_msg_debug));
+   
+    stateMachineState = newState;
     
     switch(stateMachineState)
     {
@@ -1313,150 +1049,126 @@ void setState(uint8_t newState)
         {
             disableAudioVisualBeacon();
             panicTimerReset();
+            
             break;
         }
+
         case STATE_GROUND_IDLE_ON_PAD:
         {
+            valsBarometer.ground_pressure = 0.0;
+            valsBarometer.apex_pressure = 0.0;
+
             disableAudioVisualBeacon();
-
-            // Make sure we have something in the arrays for small initial magnitude deltas
-            if(valsAccelerometer.filled_elements < SENSORS_NUM_VALUES)
-            {
-
-                for(diff = 0; diff < SENSORS_NUM_VALUES; diff++)
-                {
-                    doBarometerActions(0, ((1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)), 0);
-                    
-                    doAccelerometerActions(0, ((1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)), 0);
-                    
-                    doMagnetometerActions(0, ((1 << STATUS_UPDATE)|(1 << STATUS_UPDATE_AVERAGE)), 0);
-
-
-                }
-            }
-
-            groundStationAccelerationMagnitude = valsAccelerometer.average;
-            groundStationPressure = valsBarometer.average;
-            peakAltitudePressure = valsBarometer.average;
-
             panicTimerReset();
-            resetParachute();
+
             break;
         }
+
         case STATE_GROUND_ARMED:
         {
             disableAudioVisualBeacon();
             panicTimerReset();
+            
             break;
         }
+
         case STATE_AIRBORNE_OUTBOUND:
         {
             disableAudioVisualBeacon();
-            barometerdeltastrikes = SENSORS_BAROMETER_STRIKES;
-            peakAltitudePressure = groundStationPressure;//valsBarometer.average;
             panicTimerReset();
+            
+            barometerdeltastrikes = SENSORS_BAROMETER_STRIKES;
+            valsBarometer.apex_pressure = valsBarometer.ground_pressure;
+            
             break;
         }
+
         case STATE_AIRBORNE_DEPLOYMENT:
         {
             disableAudioVisualBeacon();
+            
             break;
         }
+
         case STATE_AIRBORNE_INBOUND:
         {
             disableAudioVisualBeacon();
-            resetParachute();
             panicTimerReset();
+
             break;
         }
+
         case STATE_GROUND_RECOVERY:
         {
             enableAudioVisualBeacon();
             panicTimerReset();
-            break;
-        }
-        case STATE_GROUND_DATADUMP:
-        {
-            disableAudioVisualBeacon();
+            
             break;
         }
 
+        case STATE_GROUND_RESET:
+        {
+            break;
+        }
     }
 }
 
 void stateMachine(uint16_t delta_millis)
 {
     int32_t diff = 0;
-    doBatteryActions(delta_millis);
+    
+    // Always read battery voltage
+    doBatteryActions(delta_millis, 0);
+    
     switch(stateMachineState)
     {
         case STATE_GROUND_IDLE_ON_PAD:
         {
-            // Keep watch on idle acceleration
-            diff = doAccelerometerActions(delta_millis, 0, 0);
-            if(GET_BIT(diff, STATUS_UPDATE_AVERAGE))
+            doMagnetometerActions(delta_millis, 0);
+            doBarometerActions(delta_millis, 0);
+
+            // Keep watch on magnetometer for arming trigger
+            if(unarmedMagnetometerReadings > 0)
             {
-                groundStationAccelerationMagnitude = valsAccelerometer.average;
-            }
-            diff = 0;
+                // Establish an average for magnetometer magnitude
+                unarmedMagnetometerReadings--;
+                unarmedMagnetometerMagnitude = (
+                                                    ((1 - AVERAGING_FACTOR) * unarmedMagnetometerMagnitude) +
+                                                    (AVERAGING_FACTOR * valsMagnetometer.vector.magnitude)
+                                                );
                     
-            // Keep watch on arming trigger
-            diff = doMagnetometerActions(delta_millis, 0, 1);
-            if(GET_BIT(diff, STATUS_UPDATE_AVERAGE))
-            {
-                //unarmedMagnetometerMagnitude = valsMagnetometer.average;
-
-                }
-            diff = 0;
-
-            // Keep watch on barometer, probably not the fastest changes, but we don't want a high magnitude just as we arm...
-            diff = doBarometerActions(delta_millis, 0, 0);
-            if(GET_BIT(diff, STATUS_UPDATE_AVERAGE))
-            {
-                groundStationPressure = valsBarometer.average;
-            }
-            diff = 0;
-
-            // Magnetometer
-            if(valsMagnetometer.prev_average > valsMagnetometer.average)
-            {
-                diff = valsMagnetometer.prev_average - valsMagnetometer.average;
             }
             else
             {
-                diff = valsMagnetometer.average - valsMagnetometer.prev_average;
+                // Start comparing against the established average magnitude
+                diff = (int32_t)abs(valsMagnetometer.vector.magnitude - unarmedMagnetometerMagnitude);
+                if(diff > configuration.configurable.limit_delta_magnetometer)
+                {
+                    Serial.print(millis());
+                    Serial.println(": MAGNETOMETER MAGNITUDE ABOVE THRESHOLD");
+                    setState(STATE_GROUND_ARMED);
+                }
             }
             
-            if(diff > configuration.limit_delta_magnetometer)
-            {
-                // Current average is no longer the unarmed value!
-                //unarmedMagnetometerMagnitude = valsAccelerometer.prev_average;
-                
-                Serial.print(millis());
-                Serial.println(": MAGNETOMETER MAGNITUDE ABOVE THRESHOLD");
-                setState(STATE_GROUND_ARMED);
-            }
+            // Crude averaging to establish ground pressure
+            valsBarometer.ground_pressure = (
+                                                ((1 - AVERAGING_FACTOR) * valsBarometer.ground_pressure) +
+                                                (AVERAGING_FACTOR * valsBarometer.abs_pressure)
+                                            );
+            diff = 0;
+
             break;
         }
         
         case STATE_GROUND_ARMED:
         {
             // Check the two possible launch-indicative magnutides
-            doAccelerometerActions(delta_millis, 0, 1);
-
-
-            diff = doBarometerActions(delta_millis, 0, 1);
-            if(GET_BIT(diff, STATUS_UPDATE_AVERAGE))
-            {
-                peakAltitudePressure = valsBarometer.average;
-            }
-
-            doMagnetometerActions(delta_millis, 0, 0);
+            doAccelerometerActions(delta_millis, 0);
+            doBarometerActions(delta_millis, 0);
+            doMagnetometerActions(delta_millis, 0);
 
             // Accelerometer
-            diff = abs(valsAccelerometer.average - groundStationAccelerationMagnitude);
-            
-            if(diff > configuration.limit_delta_accelerometer)
+            if(valsAccelerometer.vector.magnitude > configuration.configurable.limit_delta_accelerometer)
             {
                 Serial.print(millis());
                 Serial.println(": ACCELEROMETER MAGNITUDE ABOVE THRESHOLD");
@@ -1464,14 +1176,17 @@ void stateMachine(uint16_t delta_millis)
             }
 
             // Barometer
-            diff = abs(valsBarometer.average - groundStationPressure);
+            // We'll see an increase in pressure during launch, before it will decrease due to greater altitude. Either way we're simply looking for an absolute difference sufficiently large, so we use abs() here.
+            diff = (int32_t) abs(valsBarometer.ground_pressure - valsBarometer.abs_pressure);
             
-            if(diff > configuration.limit_delta_barometer)
+            if(diff > configuration.configurable.limit_delta_barometer)
             {
                 Serial.print(millis());
                 Serial.println(": BAROMETER MAGNITUDE ABOVE THRESHOLD");
                 setState(STATE_AIRBORNE_OUTBOUND);
             }
+
+            diff = 0;
 
             break;
         }
@@ -1480,36 +1195,24 @@ void stateMachine(uint16_t delta_millis)
         {
             panicTimerCountdown(delta_millis);
 
-            doAccelerometerActions(delta_millis, 0, 1);
-            doBarometerActions(delta_millis, 0, 1);
-            doMagnetometerActions(delta_millis, 0, 0);
+            doAccelerometerActions(delta_millis, 0);
+            doBarometerActions(delta_millis, 0);
+            doMagnetometerActions(delta_millis, 0);
 
             // Check for lowest pressure yet
-            if(valsBarometer.average < peakAltitudePressure)
+            if(valsBarometer.abs_pressure < valsBarometer.apex_pressure)
             {
-                peakAltitudePressure = valsBarometer.average;
+                valsBarometer.apex_pressure = valsBarometer.abs_pressure;
             }
 
-            if(valsAccelerometer.average > peakLaunchAverageAccelerationMagnitude)
-            {
-                peakLaunchAverageAccelerationMagnitude = valsAccelerometer.average;
-            }
-
-            diff = 0;
-            
             // count down positive barometer deltas, indicating a decreasing height
             // A single positive value could perhaps simply be from pressure oscillations inside the payload capsule due to turbulence during launch, so we could get a premature deployment of parachute?
-            if(valsBarometer.average < groundStationPressure)
+            if(valsBarometer.abs_pressure < valsBarometer.ground_pressure)
             {
-                if((valsBarometer.average - peakAltitudePressure) > configuration.limit_delta_barometer)
+                if((valsBarometer.abs_pressure - valsBarometer.apex_pressure) > configuration.configurable.limit_delta_barometer)
                 {
                     Serial.print(millis());
-                    Serial.print(": BAROMETER MAGNITUDE ABOVE THRESHOLD (");
-                    Serial.print(diff);
-                    Serial.print(">");
-                    Serial.print(configuration.limit_delta_barometer);
-                    Serial.println(")");
-
+                    Serial.println(": BAROMETER MAGNITUDE ABOVE THRESHOLD (");
                     barometerdeltastrikes--;
                 }
             }
@@ -1527,24 +1230,39 @@ void stateMachine(uint16_t delta_millis)
                 Serial.println(": DEPLOYING DUE TO PANIC TIMEOUT");
                 setState(STATE_AIRBORNE_DEPLOYMENT);
             }
+            
+            diff = 0;
 
             break;
         }
         
         case STATE_AIRBORNE_DEPLOYMENT:
         {
-            releaseTheKrakenshoot();
-            setState(STATE_AIRBORNE_INBOUND);
+            doAccelerometerActions(delta_millis, 0);
+            doBarometerActions(delta_millis, 0);
+            doMagnetometerActions(delta_millis, 0);
+            
+            // Wait for parachute timers
+            diff = releaseTheKrakenshoot(delta_millis);
+            
+            if(diff)
+            {
+                setState(STATE_AIRBORNE_INBOUND);
+            }
+            
+            diff = 0;
+            
             break;
         }
         
         case STATE_AIRBORNE_INBOUND:
         {
+            // Counting down to recovery state
             panicTimerCountdown(delta_millis);
 
-            doAccelerometerActions(delta_millis, 0, 1);
-            doBarometerActions(delta_millis, 0, 1);
-            doMagnetometerActions(delta_millis, 0, 0);
+            doAccelerometerActions(delta_millis, 0);
+            doBarometerActions(delta_millis, 0);
+            doMagnetometerActions(delta_millis, 0);
 
             if(panicActivate)
             {
@@ -1552,6 +1270,9 @@ void stateMachine(uint16_t delta_millis)
                 Serial.println(": Activating locator beacon due to panic timeout.");
                 setState(STATE_GROUND_RECOVERY);
             }
+
+            diff = 0;
+
             break;
         }
         
@@ -1560,29 +1281,44 @@ void stateMachine(uint16_t delta_millis)
             enableAudioVisualBeacon();
             
             // Wait for RBF to be re-applied
-            doAccelerometerActions(delta_millis, 0, 0);
-            doBarometerActions(delta_millis, 0, 0);
-            doMagnetometerActions(delta_millis, 0, 1);
+            doAccelerometerActions(delta_millis, 0);
+            doBarometerActions(delta_millis, 0);
+            doMagnetometerActions(delta_millis, 0);
             
             // Magnetometer
-            diff = abs(valsMagnetometer.average - valsMagnetometer.prev_average);
+            diff = abs(valsMagnetometer.vector.magnitude - unarmedMagnetometerMagnitude);
             
-            if(diff > configuration.limit_delta_magnetometer)
+            if(diff < configuration.configurable.limit_delta_magnetometer)
             {
                 Serial.println("MAGNETOMETER MAGNITUDE ABOVE THRESHOLD");
-                setState(STATE_GROUND_IDLE);
+                setState(STATE_GROUND_RESET);
                 //setState(STATE_GROUND_DATADUMP);
             }
+
+            diff = 0;
+
+            break;
+        }
+
+        case STATE_GROUND_RESET:
+        {
+            doAccelerometerActions(delta_millis, 0);
+            doBarometerActions(delta_millis, 0);
+            doMagnetometerActions(delta_millis, 0);
+
+            // Wait for parachute reset timers
+            diff = resetParachute(delta_millis);
+            
+            if(diff)
+            {
+                setState(STATE_GROUND_IDLE);
+            }
+
+            diff = 0;
 
             break;
         }
         
-        case STATE_GROUND_DATADUMP:
-        {
-            // Not really doing anything
-            break;
-        }
-
         default:
         case STATE_GROUND_IDLE:
         {
@@ -1591,68 +1327,44 @@ void stateMachine(uint16_t delta_millis)
     }
 }
 
-/** Check for bytes in UART receive buffer, and append them to our own command
- *    buffer, or at least as many as there is room for at the moment.
+/** Rewrite from serial to RF receive buffer...
  */
-void grabSerial()
+void commandCheck()
 {
-    uint8_t cmdlen = 0;
     uint8_t i = 0;
+    uint8_t *buffer = &cmdline[0];
     
-    // Only get more data for command buffer if it's below threshold.
-    if(cmdlength > COMMAND_LINE_APPEND_THRESHOLD)
-    {
-        return;
-    }
-
     // Check for bytes in UART receive buffer
-    cmdlen = Serial.available();
-    if(cmdlen > 0)
+    //cmdlen = Serial.available();
+    if(radio.available(PIPE_READ))
     {
-        // Don't try to overfill the command buffer
-        if((cmdlength + cmdlen) > COMMAND_LINE_BUFFER_SIZE)
+        clearMessage();
+
+        for (i = 0; i < COMMAND_LINE_BUFFER_SIZE; i++)
         {
-            // Only fill it...
-            cmdlen = COMMAND_LINE_BUFFER_SIZE - cmdlength;
+            if(radio.available(PIPE_READ))
+            {
+                radio.read(buffer++, 1);
+            }
         }
 
-        i = Serial.readBytes((char*)(&cmdline[cmdlength]), cmdlen);
+        buffer = &cmdline[0];
         
-        //Serial.print("Read ");
-        //Serial.print(i);
-        //Serial.print(" of ");
-        //Serial.print(cmdlen);
-        //Serial.println(" bytes");
-        
-        cmdlength += i;
-
-        // Don't try to terminate past end of buffer
-        if(cmdlength == COMMAND_LINE_BUFFER_SIZE)
-        {
-            //Serial.println("Command buffer at capacity!");
-            return;
-        }
-        if(cmdlength > COMMAND_LINE_BUFFER_SIZE)
-        {
-            Serial.println("E: Command buffer capacity exceeded!");
-            clearCommandBuffer();
-            return;
-        }
-        
-        cmdline[cmdlength] = '\0';
-
+        parseMessage(buffer, i);
     }
-
 }
 
 void setup()
 {
     uint8_t sensorStatus = 0;
-    int16_t servoPosition = configuration.servo_safe;
+    uint8_t sensorId = 0;
     Serial.begin(115200);
+    while(!Serial)
+    {
+        // Wait for Serial
+    }
+    
     Serial.println("setup() begins");
-
-    delay(1000);
 
     /*
     Serial.print("UART RX Buffer size: ");
@@ -1674,20 +1386,31 @@ void setup()
     
     Serial.println("Setting up pins...");
 
-    pinMode(BUZZER_PIN, OUTPUT);
-    pinMode(PARACHUTE_SERVO_PIN, OUTPUT);
-    pinMode(SERVO_ENABLE_PIN, OUTPUT);
-    pinMode(BLINKER_PIN, OUTPUT);
+    pinMode(PIN_BUZZER, OUTPUT);
+    pinMode(PIN_PARACHUTE_SERVO, OUTPUT);
+    pinMode(PIN_SERVO_ENABLE, OUTPUT);
+    pinMode(PIN_BLINKER, OUTPUT);
 
     delay(1000);
 
+    // Setup and configure rf radio
+    radio.begin();
+    radio.setAutoAck(1);                    // Ensure autoACK is enabled
+    radio.enableAckPayload();               // Allow optional ack payloads
+    radio.setRetries(0, 5);                 // Smallest time between retries, max no. of retries
+    //radio.setPayloadSize(32);
+    radio.openWritingPipe(pipes[PIPE_WRITE]);        // Both radios listen on the same pipes by default, and switch when writing
+    radio.openReadingPipe(1, pipes[PIPE_READ]);
+    radio.startListening();                 // Start listening
+    radio.printDetails();                   // Dump the configuration of the rf unit for debugging
+
     //Serial.println("Initializing parachute release servo...");
     
-    parachuteReleaseServo.attach(PARACHUTE_SERVO_PIN);
+    parachuteReleaseServo.attach(PIN_PARACHUTE_SERVO);
 
     //Serial.println("Safe position...");
 
-    resetParachute();
+    resetParachute(0);
     //parachuteReleaseServo.write(configuration.servo_safe);
 
     delay(1000);
@@ -1711,36 +1434,51 @@ void setup()
     
     //Serial.println("Barometer...");
     SET_BIT(sensorStatus, STATUS_BAROMETER_DETECTED);
-    if (!bmp.begin()) {
-        Serial.println("BE");
-        CLEAR_BIT(sensorStatus, STATUS_BAROMETER_DETECTED);
-    }
-
-    // nothing to set
-
-    //Serial.println("Magnetometer...");
-    SET_BIT(sensorStatus, STATUS_MAGNETOMETER_DETECTED);
-    if(!mag.begin())
+    if(!bmp.begin())
     {
-        Serial.println("ME");
-        CLEAR_BIT(sensorStatus, STATUS_MAGNETOMETER_DETECTED);
+        Serial.println("Default address initialization of BMP280 failed.");
+        if(!bmp.begin(BMP280_ADDRESS_ALT))
+        {
+            // error
+            CLEAR_BIT(sensorStatus, STATUS_BAROMETER_DETECTED);
+        }
     }
+
+    bmp.setSampling(
+        Adafruit_BMP280::MODE_NORMAL,   /* Operating Mode. */
+        Adafruit_BMP280::SAMPLING_X2,   /* Temp. oversampling */
+        Adafruit_BMP280::SAMPLING_X16,  /* Pressure oversampling */
+        Adafruit_BMP280::FILTER_OFF,    /* Filtering. */
+        Adafruit_BMP280::STANDBY_MS_1   /* Standby time. */
+    );
+
 
     //mag.setMagGain();
 
     //Serial.println("Accelerometer...");
     SET_BIT(sensorStatus, STATUS_ACCELEROMETER_DETECTED);
-    if(!acc.begin())
+    SET_BIT(sensorStatus, STATUS_MAGNETOMETER_DETECTED);
+
+    mpu.beginAccel();
+    mpu.beginMag(MAG_MODE_CONTINUOUS_100HZ);
+
+    if (mpu.readId(&sensorId) == 0)
     {
-        Serial.println("AE");
-        CLEAR_BIT(sensorStatus, STATUS_ACCELEROMETER_DETECTED);
+        // A-OK
+        Serial.println("sensorId: " + String(sensorId));
     }
+    else
+    {
+        Serial.println("Cannot read sensorId");
+        // Error
+        CLEAR_BIT(sensorStatus, STATUS_ACCELEROMETER_DETECTED);
+        CLEAR_BIT(sensorStatus, STATUS_MAGNETOMETER_DETECTED);
 
-    acc.setDataRate(ADXL345_DATARATE_800_HZ);
-    acc.setRange(ADXL345_RANGE_16_G);
-
-    // At least one sensor was initialized...
-    displaySensorDetails(sensorStatus);
+        //while(true)
+        //{
+        //    // Halt
+        //}
+    }
 
     Serial.print("setup() ends at ");
     Serial.println(millis());
@@ -1752,20 +1490,20 @@ uint16_t getDeltaMillis()
     uint32_t this_millis = millis();
 
     // Check for wrap-around of millis counter
-    if(this_millis < configuration.millis_previous_loop)
+    if(this_millis < configuration.dynamic.millis_previous_loop)
     {
         // Add the remainder until wrap-around for previous loop
-        delta_millis = (uint32_t)-1 - configuration.millis_previous_loop;
+        delta_millis = (uint32_t)-1 - configuration.dynamic.millis_previous_loop;
 
         // Add this loop's millis
         delta_millis += this_millis;
     }
     else
     {
-        delta_millis = this_millis - configuration.millis_previous_loop;
+        delta_millis = this_millis - configuration.dynamic.millis_previous_loop;
     }
 
-    configuration.millis_previous_loop = this_millis;
+    configuration.dynamic.millis_previous_loop = this_millis;
 
     return delta_millis;
 }
@@ -1777,14 +1515,7 @@ void loop()
     uint16_t delta_millis = 0;
     delta_millis = getDeltaMillis();
     
-    grabSerial();
-
-    i = parseCommand();
-
-    if(i > 0)
-    {
-        stripCommand(i);
-    }
+    commandCheck();
 
     stateMachine(delta_millis);
 
